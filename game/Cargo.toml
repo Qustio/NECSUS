@@ -1,0 +1,17 @@
+[package]
+name = "game"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+color-eyre = "0.6.5"
+engine = {path = "../engine"}
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+tracing-tracy = "0.11.4"
+tracy = "0.2.0"
+tracy-client = "0.18.4"
+
+[features]
+default = []
+memory_profiling = []
