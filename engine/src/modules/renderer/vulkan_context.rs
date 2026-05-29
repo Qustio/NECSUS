@@ -58,7 +58,9 @@ impl VulkanContext {
     }
 }
 
+#[derive(derive_more::Deref)]
 pub struct Instance {
+    #[deref]
     instance: ash::Instance,
     entry: ash::Entry,
 }
@@ -133,7 +135,7 @@ impl DebugMsg {
     fn new(
         instance: Arc<Instance>,
     ) -> Result<Arc<Self>, Box<dyn Error + Send + Sync>>{
-        let dbg_instance = ext::debug_utils::Instance::new(&instance.entry, &instance.instance);
+        let dbg_instance = ext::debug_utils::Instance::new(&instance.entry, &instance);
         let info = vk::DebugUtilsMessengerCreateInfoEXT::default()
             .message_severity(
                 vk::DebugUtilsMessageSeverityFlagsEXT::INFO |
@@ -188,7 +190,9 @@ impl Drop for DebugMsg {
     }
 }
 
+#[derive(derive_more::Deref)]
 pub struct Surface {
+    #[deref]
     surface_instance: khr::surface::Instance,
     surface: vk::SurfaceKHR,
 }
@@ -202,13 +206,13 @@ impl Surface {
         let surface = unsafe {
             ash_window::create_surface(
                 &instance.entry,
-                &instance.instance,
+                &instance,
                 display_handle,
                 window_handle,
                 None
             )?
         };
-        let surface_instance = khr::surface::Instance::new(&instance.entry, &instance.instance);
+        let surface_instance = khr::surface::Instance::new(&instance.entry, &instance);
         Ok(Arc::new(Self {
             surface_instance,
             surface,
@@ -224,7 +228,9 @@ impl Drop for Surface {
     }
 }
 
+#[derive(derive_more::Deref)]
 pub struct Device {
+    #[deref]
     device: ash::Device,
     physical_device: vk::PhysicalDevice,
     graphics_queue_index: u32,
@@ -237,7 +243,7 @@ impl Device {
         surface: &Surface,
     ) -> Result<Arc<Self>, Box<dyn Error + Send + Sync>> {
         let (physical_device, queue_family_index) = unsafe {
-            instance.instance
+            instance
             .enumerate_physical_devices()?
             .into_iter()
             .filter_map(|p| {
@@ -245,24 +251,22 @@ impl Device {
                 // or report properties and limits that are not sufficient for your application.
                 // These should be filtered out here.
 
-                let queue_families = unsafe {
-                    instance.instance.get_physical_device_queue_family_properties(p)
-                };
+                let queue_families = instance.get_physical_device_queue_family_properties(p);
 
                 // Want one family that does graphics AND can present to our surface.
                 queue_families.iter().enumerate().find_map(|(i, qf)| {
                     let index = i as u32;
                     let graphics_support = qf.queue_flags.contains(vk::QueueFlags::GRAPHICS);
-                    let surface_support = unsafe {
-                        surface.surface_instance.get_physical_device_surface_support(p, index, surface.surface).unwrap_or(false)
-                    };
+                    let surface_support = surface
+                        .get_physical_device_surface_support(p, index, surface.surface)
+                        .unwrap_or(false);
 
                     (graphics_support && surface_support).then_some((p, index))
                 })
             })
             .min_by_key(|&(p, _)| {
                 // We assign a lower score to device types that are likely to be faster/better.
-                let props = instance.instance.get_physical_device_properties(p);
+                let props = instance.get_physical_device_properties(p);
                 match props.device_type {
                     vk::PhysicalDeviceType::DISCRETE_GPU => 0,
                     vk::PhysicalDeviceType::INTEGRATED_GPU => 1,
@@ -282,7 +286,7 @@ impl Device {
             extensions.push(khr::buffer_device_address::NAME.as_ptr());
             extensions.push(ext::host_query_reset::NAME.as_ptr());
 
-            instance.instance.create_device(
+            instance.create_device(
                 physical_device,
                 &vk::DeviceCreateInfo::default()
                     .enabled_extension_names(&extensions)
@@ -312,7 +316,9 @@ impl Drop for Device {
     }
 }
 
+#[derive(derive_more::Deref)]
 pub struct Allocator {
+    #[deref]
     allocator: vk_mem::Allocator,
     device: Arc<Device>,
 }
@@ -324,7 +330,7 @@ impl Allocator {
     ) -> Result<Arc<Self>, Box<dyn Error + Send + Sync>> {
         let allocator = unsafe {
             vk_mem::Allocator::new(
-                vk_mem::AllocatorCreateInfo::new(&instance.instance, &device, device.physical_device)
+                vk_mem::AllocatorCreateInfo::new(&instance, &device, device.physical_device)
             )?
         };
         Ok(Arc::new(Self {
