@@ -33,14 +33,14 @@ impl Module for RendererModule {
 fn render_record(
 
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    tracing::debug!("rener: record");
+    //tracing::debug!("rener: record");
     Ok(())
 }
 
 fn render_submit(
 
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    tracing::debug!("rener: submit");
+    //tracing::debug!("rener: submit");
     Ok(())
 }
 
@@ -62,7 +62,7 @@ fn setup_renderer(
     let swapchain = swapchain::Swapchain::new(
         context.instance.clone(),
         context.device.clone(),
-        &context.surface,
+        context.surface.clone(),
         size
     )?;
 

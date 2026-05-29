@@ -10,12 +10,12 @@ const ENABLE_VALIDATION: bool = cfg!(debug_assertions);
 
 #[derive(Unique)]
 pub struct VulkanContext {
-    pub instance: Arc<Instance>,
     pub debug_msg: Arc<DebugMsg>,
     pub surface: Arc<Surface>,
     pub device: Arc<Device>,
     //pub(crate) graphics_queue: Arc<vk::Queue>,
-    allocator: Arc<Allocator>,
+    pub allocator: Arc<Allocator>,
+    pub instance: Arc<Instance>,
 }
 
 impl VulkanContext {

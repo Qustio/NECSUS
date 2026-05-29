@@ -14,14 +14,15 @@ pub struct Swapchain {
     format: vk::SurfaceFormatKHR,
     extent: vk::Extent2D,
     present_mode: vk::PresentModeKHR,
-    device: Arc<Device>
+    surface: Arc<Surface>,
+    device: Arc<Device>,
 }
 
 impl Swapchain {
     pub(super) fn new(
         instance: Arc<Instance>,
         device: Arc<Device>,
-        surface: &Surface,
+        surface: Arc<Surface>,
         size: PhysicalSize<u32>
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let swapchain_loader = khr::swapchain::Device::new(&instance, &device);
@@ -100,6 +101,8 @@ impl Swapchain {
                         format: format.format,
                         subresource_range: vk::ImageSubresourceRange{
                             aspect_mask: vk::ImageAspectFlags::COLOR,
+                            level_count: 1,
+                            layer_count: 1,
                             ..Default::default()
                         },
                         ..Default::default()
@@ -117,6 +120,7 @@ impl Swapchain {
             format,
             extent,
             present_mode,
+            surface,
             device
         })
     }
