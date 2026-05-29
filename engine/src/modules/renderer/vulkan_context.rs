@@ -286,6 +286,10 @@ impl Device {
             extensions.push(khr::buffer_device_address::NAME.as_ptr());
             extensions.push(ext::host_query_reset::NAME.as_ptr());
 
+            let mut extensions13 = vk::PhysicalDeviceVulkan13Features::default()
+                .dynamic_rendering(true)
+                .synchronization2(true);
+
             instance.create_device(
                 physical_device,
                 &vk::DeviceCreateInfo::default()
@@ -295,7 +299,8 @@ impl Device {
                         &[vk::DeviceQueueCreateInfo::default()
                             .queue_family_index(queue_family_index)
                             .queue_priorities(&[1.0_f32])]
-                    ),
+                    )
+                    .push_next(&mut extensions13),
                 None
             )?
         };
