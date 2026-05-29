@@ -1,4 +1,5 @@
 use std::ffi::{CString, c_char};
+use std::ops::Deref;
 use std::{error::Error, ffi::CStr};
 use std::sync::Arc;
 use shipyard::*;
@@ -14,7 +15,7 @@ pub struct VulkanContext {
     pub surface: Arc<Surface>,
     pub device: Arc<Device>,
     //pub(crate) graphics_queue: Arc<vk::Queue>,
-    //pub(crate) allocator: Arc<vk_mem::Allocator>,
+    allocator: Arc<Allocator>,
 }
 
 impl VulkanContext {
@@ -42,12 +43,17 @@ impl VulkanContext {
             instance.clone(),
             &surface
         )?;
+        let allocator = Allocator::new(
+            instance.clone(),
+            device.clone()
+        )?;
 
         Ok(Self {
             instance,
             debug_msg,
             surface,
             device,
+            allocator
         })
     }
 }
@@ -185,7 +191,6 @@ impl Drop for DebugMsg {
 pub struct Surface {
     surface_instance: khr::surface::Instance,
     surface: vk::SurfaceKHR,
-    instance: Arc<Instance>,
 }
 
 impl Surface {
@@ -207,7 +212,6 @@ impl Surface {
         Ok(Arc::new(Self {
             surface_instance,
             surface,
-            instance
         }))
     }
 }
@@ -305,5 +309,27 @@ impl Drop for Device {
         unsafe {
             self.device.destroy_device(None);
         }
+    }
+}
+
+pub struct Allocator {
+    allocator: vk_mem::Allocator,
+    device: Arc<Device>,
+}
+
+impl Allocator {
+    fn new(
+        instance: Arc<Instance>,
+        device: Arc<Device>,
+    ) -> Result<Arc<Self>, Box<dyn Error + Send + Sync>> {
+        let allocator = unsafe {
+            vk_mem::Allocator::new(
+                vk_mem::AllocatorCreateInfo::new(&instance.instance, &device, device.physical_device)
+            )?
+        };
+        Ok(Arc::new(Self {
+            allocator,
+            device,
+        }))
     }
 }
