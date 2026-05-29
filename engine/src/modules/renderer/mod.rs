@@ -1,6 +1,7 @@
 pub mod vulkan_context;
 pub mod swapchain;
 pub mod frame_sync;
+pub mod command_context;
 
 use std::error::Error;
 use shipyard::{AllStoragesViewMut, Label, scheduler::IntoWorkloadTrySystem};
