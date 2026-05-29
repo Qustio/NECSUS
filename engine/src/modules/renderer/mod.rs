@@ -1,4 +1,5 @@
 pub mod vulkan_context;
+pub mod swapchain;
 
 use std::error::Error;
 use shipyard::{AllStoragesViewMut, Label, scheduler::IntoWorkloadTrySystem};
@@ -48,6 +49,7 @@ fn setup_renderer(
 ) -> Result<(), Box<dyn Error + Send + Sync>>  {
     let app_data = world.get_unique::<&AppData>()?;
     let window = world.get_unique::<&Window>()?;
+    let size = window.window.inner_size();
     
     // Create context
     let context = vulkan_context::VulkanContext::new(
@@ -56,6 +58,15 @@ fn setup_renderer(
         &window.window
     ).unwrap();
 
+    // Create swapchain
+    let swapchain = swapchain::Swapchain::new(
+        context.instance.clone(),
+        context.device.clone(),
+        &context.surface,
+        size
+    )?;
+
     world.add_unique(context);
+    world.add_unique(swapchain);
     Ok(())
 }

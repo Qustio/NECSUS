@@ -19,7 +19,7 @@ pub struct VulkanContext {
 }
 
 impl VulkanContext {
-    pub(crate) fn new(
+    pub(super) fn new(
         name: &str,
         version: u32,
         window: &Arc<winit::window::Window>
@@ -194,7 +194,7 @@ impl Drop for DebugMsg {
 pub struct Surface {
     #[deref]
     surface_instance: khr::surface::Instance,
-    surface: vk::SurfaceKHR,
+    pub(super) surface: vk::SurfaceKHR,
 }
 
 impl Surface {
@@ -232,7 +232,7 @@ impl Drop for Surface {
 pub struct Device {
     #[deref]
     device: ash::Device,
-    physical_device: vk::PhysicalDevice,
+    pub(super) physical_device: vk::PhysicalDevice,
     graphics_queue_index: u32,
     instance: Arc<Instance>,
 }
