@@ -1,7 +1,7 @@
 use std::ffi::{CString, c_char};
 use std::ops::Deref;
 use std::{error::Error, ffi::CStr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use shipyard::*;
 use ash::{*};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -13,7 +13,6 @@ pub struct VulkanContext {
     pub debug_msg: Arc<DebugMsg>,
     pub surface: Arc<Surface>,
     pub device: Arc<Device>,
-    //pub(crate) graphics_queue: Arc<vk::Queue>,
     pub allocator: Arc<Allocator>,
     pub instance: Arc<Instance>,
 }
@@ -234,6 +233,7 @@ pub struct Device {
     device: ash::Device,
     pub(super) physical_device: vk::PhysicalDevice,
     graphics_queue_index: u32,
+    pub graphics_queue: Mutex<vk::Queue>,
     instance: Arc<Instance>,
 }
 
@@ -299,10 +299,16 @@ impl Device {
                 None
             )?
         };
+
+        let queue = unsafe {
+            device.get_device_queue(queue_family_index, 0)
+        };
+
         Ok(Arc::new(Self {
             device,
             physical_device,
             graphics_queue_index: queue_family_index,
+            graphics_queue: Mutex::new(queue),
             instance
         }))
     }

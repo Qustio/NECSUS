@@ -1,5 +1,6 @@
 pub mod vulkan_context;
 pub mod swapchain;
+pub mod frame_sync;
 
 use std::error::Error;
 use shipyard::{AllStoragesViewMut, Label, scheduler::IntoWorkloadTrySystem};
@@ -66,7 +67,14 @@ fn setup_renderer(
         size
     )?;
 
+    // Frame sync data
+    let frame_sync = frame_sync::FrameSync::new(
+        context.device.clone(),
+        swapchain.frame_count
+    )?;
+
     world.add_unique(context);
     world.add_unique(swapchain);
+    world.add_unique(frame_sync);
     Ok(())
 }

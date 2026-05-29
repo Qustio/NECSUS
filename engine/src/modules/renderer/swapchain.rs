@@ -14,6 +14,7 @@ pub struct Swapchain {
     format: vk::SurfaceFormatKHR,
     extent: vk::Extent2D,
     present_mode: vk::PresentModeKHR,
+    pub frame_count: u32,
     surface: Arc<Surface>,
     device: Arc<Device>,
 }
@@ -111,6 +112,8 @@ impl Swapchain {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        let frame_count = images.len() as u32;
+
         Ok(Self{
             swapchain_loader,
             swapchain,
@@ -119,6 +122,7 @@ impl Swapchain {
             format,
             extent,
             present_mode,
+            frame_count,
             surface,
             device
         })
