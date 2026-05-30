@@ -44,5 +44,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .import::<modules::window::WindowModule>()?
         .import::<modules::renderer::RendererModule>()?
         .run()?;
+
+	tracing::info!("close");
     Ok(())
 }

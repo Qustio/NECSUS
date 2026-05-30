@@ -1,70 +1,235 @@
 
-use super::vulkan_context::{Instance, Device, Surface};
+use crate::modules::renderer::{frame_sync::FrameSync, pass::Pass, swapchain::Swapchain};
+
+use super::vulkan_context::Device;
 use ash::*;
 use std::{error::Error, sync::Arc};
-use shipyard::{AllStoragesViewMut, Label, Unique, scheduler::IntoWorkloadTrySystem};
-use crate::{State, modules::{Module, System, core::AppData, window::Window}};
+use shipyard::Unique;
 
-#[derive(derive_more::Deref)]
-pub struct CommandPool {
-    #[deref]
-    command_pool:   vk::CommandPool,
-    device: Arc<Device>,
+pub struct FrameCommand {
+    pub(super) buffer: vk::CommandBuffer,
+	pub(super) pool: vk::CommandPool,
+    pub(super) device: Arc<Device>,
 }
 
-impl CommandPool {
+impl FrameCommand {
     pub(super) fn new(
-        device: Arc<Device>,
-        queue_family_index: u32,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let command_pool = unsafe { 
+		device: Arc<Device>,
+		level: vk::CommandBufferLevel,
+	) -> Result<Self, Box<dyn Error + Send + Sync>> {
+		let pool = unsafe {
             device.create_command_pool(
                 &vk::CommandPoolCreateInfo::default()
-                    .queue_family_index(queue_family_index)
+                    .queue_family_index(device.graphics_queue_index)
                     .flags(vk::CommandPoolCreateFlags::TRANSIENT),
-                None
+                None,
             )?
         };
-        Ok(Self {
-            command_pool,
-            device
-        })
-    }
-}
-
-impl Drop for CommandPool {
-    fn drop(&mut self) {
-        unsafe {
-            self.device.destroy_command_pool(self.command_pool, None);
-        }
-    }
-}
-
-pub struct FrameCommands {
-    pub buffer: vk::CommandBuffer,
-    pub command_pool:   Arc<CommandPool>,
-}
-
-impl FrameCommands {
-    pub(super) fn new(
-        command_pool: Arc<CommandPool>
-    )-> Result<Self, Box<dyn Error + Send + Sync>> {
         let buffer = unsafe {
-            command_pool.device.allocate_command_buffers(
+            device.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::default()
-                .command_buffer_count(1)
-                .command_pool(**command_pool)
-                .level(vk::CommandBufferLevel::PRIMARY)
+                    .command_buffer_count(1)
+                    .command_pool(pool)
+                    .level(level),
             )?[0]
         };
-        Ok(Self{
-            buffer,
-            command_pool
-        })
+        Ok(Self {
+			buffer,
+			pool,
+			device
+		})
+    }
+}
+
+
+impl Drop for FrameCommand {
+    fn drop(&mut self) {
+        unsafe {
+			let _ = self.device.wait_queue();
+            self.device.destroy_command_pool(self.pool, None);
+        }
     }
 }
 
 #[derive(Unique)]
 pub struct CommandContext {
-    pub frames: Vec<FrameCommands>,
+    pub commands: Vec<FrameCommand>,
+}
+
+impl CommandContext {
+    pub(super) fn new(
+        device: Arc<Device>,
+        frame_count: u32,
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let frames = (0..frame_count)
+            .map(|_| FrameCommand::new(device.clone(), vk::CommandBufferLevel::PRIMARY))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { commands: frames })
+    }
+
+	pub(super) fn begin(
+		&self,
+		id: u32
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
+		let _span = tracy_client::span!();
+		let frame = &self.commands[id as usize];
+		unsafe {
+			frame.device.reset_command_pool(
+				frame.pool,
+				vk::CommandPoolResetFlags::empty()
+			)?;
+			frame.device.begin_command_buffer(
+				frame.buffer,
+				&vk::CommandBufferBeginInfo::default()
+					.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+			)?;
+		}
+		Ok(())
+	}
+
+	pub(super) fn swapchain_to_optimal(
+		&self,
+		frame_sync: &FrameSync,
+		swapchain: &Swapchain,
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
+		let _span = tracy_client::span!();
+		let id = frame_sync.frame_id as usize;
+		let id_image = frame_sync.acquired_image_index as usize;
+		let cmd = &self.commands[id];
+		let image = swapchain.images[id_image];
+
+		let color_range = vk::ImageSubresourceRange {
+			aspect_mask: vk::ImageAspectFlags::COLOR,
+			level_count: 1,
+			layer_count: 1,
+			..Default::default()
+		};
+
+		unsafe {
+			cmd.device.cmd_pipeline_barrier2(
+				cmd.buffer,
+				&vk::DependencyInfo::default().image_memory_barriers(&[
+					vk::ImageMemoryBarrier2::default()
+						.src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
+						.dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+						.src_access_mask(vk::AccessFlags2::NONE)
+						.dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+						.old_layout(vk::ImageLayout::UNDEFINED)
+						.new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+						.image(image)
+						.subresource_range(color_range)
+				])
+			);
+		}
+		Ok(())
+	}
+
+	pub(super) fn swapchain_to_present(
+		&self,
+		frame_sync: &FrameSync,
+		swapchain: &Swapchain,
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
+		let _span = tracy_client::span!();
+		let id = frame_sync.frame_id as usize;
+		let id_image = frame_sync.acquired_image_index as usize;
+		let cmd = &self.commands[id];
+		let image = swapchain.images[id_image];
+
+		let color_range = vk::ImageSubresourceRange {
+			aspect_mask: vk::ImageAspectFlags::COLOR,
+			level_count: 1,
+			layer_count: 1,
+			..Default::default()
+		};
+
+		unsafe {
+			cmd.device.cmd_pipeline_barrier2(
+				cmd.buffer,
+				&
+				vk::DependencyInfo::default().image_memory_barriers(&[
+					vk::ImageMemoryBarrier2::default()
+						.src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+						.dst_stage_mask(vk::PipelineStageFlags2::BOTTOM_OF_PIPE)
+						.src_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+						.dst_access_mask(vk::AccessFlags2::NONE)
+						.old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+						.new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+						.image(image)
+						.subresource_range(color_range)
+				])
+			);
+		}
+		Ok(())
+	}
+
+	pub(super) fn begin_rendering(
+		&self,
+		frame_sync: &FrameSync,
+		swapchain: &Swapchain,
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
+		let _span = tracy_client::span!();
+		let id = frame_sync.frame_id as usize;
+		let id_image = frame_sync.acquired_image_index as usize;
+		let cmd = &self.commands[id];
+		let image_view = swapchain.image_views[id_image];
+		unsafe {
+			cmd.device.cmd_begin_rendering(
+				cmd.buffer,
+				&vk::RenderingInfo::default()
+					.render_area(vk::Rect2D::default().extent(swapchain.extent))
+					.layer_count(1)
+					.color_attachments(&[vk::RenderingAttachmentInfo::default()
+						.image_view(image_view)
+						.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+						.load_op(vk::AttachmentLoadOp::CLEAR)
+						.store_op(vk::AttachmentStoreOp::STORE)
+						.clear_value(vk::ClearValue {
+							color: vk::ClearColorValue{
+								float32: [1.0; 4]
+							}
+						})
+					]),
+			);
+		}
+		Ok(())
+	}
+
+	pub(super) fn execute_commands(
+		&self,
+		frame_sync: &FrameSync,
+		cmds: &[&dyn Pass],
+	) {
+		let id = frame_sync.frame_id as usize;
+		let primary_cmd = &self.commands[id];
+		let buffers = cmds.iter().map(|cmd| cmd.buffer(frame_sync)).collect::<Vec<_>>();
+		unsafe { primary_cmd.device.cmd_execute_commands(primary_cmd.buffer, &buffers); }
+	}
+
+	pub(super) fn end_rendering(
+		&self,
+		frame_sync: &FrameSync,
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
+		let _span = tracy_client::span!();
+		let id = frame_sync.frame_id as usize;
+		let cmd = &self.commands[id];
+		unsafe {
+			cmd.device.cmd_end_rendering(cmd.buffer);
+		}
+		Ok(())
+	}
+
+	pub(super) fn end(
+		&self,
+		frame_sync: &FrameSync
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
+		let _span = tracy_client::span!();
+		let id = frame_sync.frame_id as usize;
+		let cmd = &self.commands[id as usize];
+		unsafe {
+			cmd.device.end_command_buffer(
+				cmd.buffer
+			)?;
+		}
+		Ok(())
+	}
 }

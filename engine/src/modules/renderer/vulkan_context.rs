@@ -6,7 +6,8 @@ use shipyard::*;
 use ash::{*};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
-const ENABLE_VALIDATION: bool = cfg!(debug_assertions);
+//const ENABLE_VALIDATION: bool = cfg!(debug_assertions);
+const ENABLE_VALIDATION: bool = true;
 
 #[derive(Unique)]
 pub struct VulkanContext {
@@ -36,7 +37,8 @@ impl VulkanContext {
         let surface = Surface::new(
             instance.clone(),
             display_handle,
-            window_handle
+            window_handle,
+            window.clone(),
         )?;
         let device = Device::new(
             instance.clone(),
@@ -88,7 +90,7 @@ impl Instance {
             if ENABLE_VALIDATION {
                 layers.push(c"VK_LAYER_KHRONOS_validation".as_ptr());
             }
-            
+
             let mut debug_messenger_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
                 .message_severity(
                     vk::DebugUtilsMessageSeverityFlagsEXT::INFO |
@@ -128,6 +130,7 @@ impl Drop for Instance {
 pub struct DebugMsg {
     messager: vk::DebugUtilsMessengerEXT,
     dbg_instance: ext::debug_utils::Instance,
+	instance: Arc<Instance>
 }
 
 impl DebugMsg {
@@ -153,6 +156,7 @@ impl DebugMsg {
         Ok(Arc::new( Self {
             messager,
             dbg_instance,
+			instance
         }))
     }
 
@@ -176,7 +180,7 @@ impl DebugMsg {
             },
             Err(e) => tracing::error!("vulkan_debug_callback UTF8 parsing error - {e}"),
         }
-        
+
         vk::FALSE
     }
 }
@@ -194,6 +198,7 @@ pub struct Surface {
     #[deref]
     surface_instance: khr::surface::Instance,
     pub(super) surface: vk::SurfaceKHR,
+    _window: Arc<winit::window::Window>,
 }
 
 impl Surface {
@@ -201,6 +206,7 @@ impl Surface {
         instance: Arc<Instance>,
         display_handle: winit::raw_window_handle::RawDisplayHandle,
         window_handle: winit::raw_window_handle::RawWindowHandle,
+        window: Arc<winit::window::Window>,
     ) -> Result<Arc<Self>, Box<dyn Error + Send + Sync>> {
         let surface = unsafe {
             ash_window::create_surface(
@@ -215,6 +221,7 @@ impl Surface {
         Ok(Arc::new(Self {
             surface_instance,
             surface,
+            _window: window,
         }))
     }
 }
@@ -232,7 +239,7 @@ pub struct Device {
     #[deref]
     device: ash::Device,
     pub(super) physical_device: vk::PhysicalDevice,
-    graphics_queue_index: u32,
+    pub graphics_queue_index: u32,
     pub graphics_queue: Mutex<vk::Queue>,
     instance: Arc<Instance>,
 }
@@ -317,12 +324,27 @@ impl Device {
             instance
         }))
     }
+
+	pub fn wait_queue(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+		let q = self.graphics_queue.lock().expect("couldnt lock queue");
+		unsafe {
+			self.queue_wait_idle(*q)?;
+		}
+		Ok(())
+	}
+
+	pub fn wait(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+		unsafe {
+			self.device_wait_idle()?;
+		}
+		Ok(())
+	}
 }
 
 impl Drop for Device {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_device(None);
+            self.destroy_device(None);
         }
     }
 }
