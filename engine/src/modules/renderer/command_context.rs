@@ -72,14 +72,14 @@ impl CommandContext {
 		id: u32
 	) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let _span = tracy_client::span!();
-		let frame = &self.commands[id as usize];
+		let cmd = &self.commands[id as usize];
 		unsafe {
-			frame.device.reset_command_pool(
-				frame.pool,
+			cmd.device.reset_command_pool(
+				cmd.pool,
 				vk::CommandPoolResetFlags::empty()
 			)?;
-			frame.device.begin_command_buffer(
-				frame.buffer,
+			cmd.device.begin_command_buffer(
+				cmd.buffer,
 				&vk::CommandBufferBeginInfo::default()
 					.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
 			)?;
