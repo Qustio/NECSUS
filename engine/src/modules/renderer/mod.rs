@@ -3,6 +3,10 @@ pub mod swapchain;
 pub mod frame_sync;
 pub mod command_context;
 pub mod pass;
+pub mod buffer;
+pub mod mesh;
+pub mod pipeline;
+pub mod material;
 
 use std::error::Error;
 use shipyard::{AllStoragesViewMut, Label, UniqueView, UniqueViewMut, scheduler::IntoWorkloadTrySystem};
@@ -60,33 +64,37 @@ fn render_start(
 
 	frame_sync.wait()?;
 	swapchain.acqure(&mut frame_sync).expect("OUT OF DATE");
-	
+
 	cmd_ctx.begin(frame_sync.frame_id)?;
 	cmd_ctx.swapchain_to_optimal(&frame_sync, &swapchain)?;
-	cmd_ctx.begin_rendering(&frame_sync, &swapchain)?;
 
+	// clearing image - can be one call
+	cmd_ctx.begin_rendering(&frame_sync, &swapchain)?;
+	cmd_ctx.end_rendering(&frame_sync)?;
     Ok(())
 }
 
 fn render_record_main(
 	rame_sync: UniqueView<frame_sync::FrameSync>,
 	main_pass: UniqueView<pass::Main>,
+	swapchain: UniqueView<swapchain::Swapchain>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
-	main_pass.record(&rame_sync);
+	main_pass.record(&rame_sync, &swapchain);
     Ok(())
 }
 
 fn render_record_back(
 	rame_sync: UniqueView<frame_sync::FrameSync>,
 	back_pass: UniqueView<pass::Back>,
+	swapchain: UniqueView<swapchain::Swapchain>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
-	back_pass.record(&rame_sync);
+	back_pass.record(&rame_sync, &swapchain);
     Ok(())
 }
 
@@ -101,9 +109,9 @@ fn render_submit(
     let _span = tracy_client::span!();
 	_span.emit_color(0x5566AA);
 
-	cmd_ctx.end_rendering(&frame_sync)?;
-	cmd_ctx.swapchain_to_present(&frame_sync, &swapchain)?;
+	
 	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &back_pass]);
+	cmd_ctx.swapchain_to_present(&frame_sync, &swapchain)?;
 	cmd_ctx.end(&frame_sync)?;
 	frame_sync.submit(&cmd_ctx)?;
 	swapchain.present(&mut frame_sync)?;
@@ -177,6 +185,7 @@ fn setup_renderer(
 	)?;
 	let back_pass = pass::Back::new(
 		context.device.clone(),
+		context.allocator.clone(),
 		swapchain.frame_count,
 		swapchain.format.format,
 	)?;
