@@ -12,15 +12,10 @@ use super::buffer::Buffer;
 use super::command_context::FrameCommand;
 
 pub(crate) trait Pass {
-	fn record(&self, frame_sync: &FrameSync, swapchain: &Swapchain);
 	fn buffer(&self, frame_sync: &FrameSync) -> vk::CommandBuffer;
 }
 
 impl<T: Pass + Unique> Pass for UniqueView<'_, T> {
-	fn record(&self, frame_sync: &FrameSync, swapchain: &Swapchain) {
-		self.deref().record(frame_sync, swapchain);
-	}
-
 	fn buffer(&self, frame_sync: &FrameSync) -> vk::CommandBuffer {
 		self.deref().buffer(frame_sync)
 	}
@@ -46,10 +41,8 @@ impl Main {
 			image_format,
 		})
     }
-}
 
-impl Pass for Main {
-	fn record(&self, frame_sync: &FrameSync, swapchain: &Swapchain) {
+	pub(super) fn record(&self, frame_sync: &FrameSync, swapchain: &Swapchain) {
 		let id = frame_sync.frame_id as usize;
 		let cmd = &self.commands[id];
 		unsafe {
@@ -72,7 +65,9 @@ impl Pass for Main {
 			cmd.device.end_command_buffer(cmd.buffer);
 		}
 	}
+}
 
+impl Pass for Main {
 	fn buffer(&self, frame_sync: &FrameSync) -> vk::CommandBuffer {
 		let id = frame_sync.frame_id as usize;
 		self.commands[id].buffer
@@ -125,10 +120,8 @@ impl Back {
 			image_format,
 		})
     }
-}
 
-impl Pass for Back {
-	fn record(&self, frame_sync: &FrameSync, swapchain: &Swapchain) {
+	pub(super) fn record(&self, frame_sync: &FrameSync, swapchain: &Swapchain) {
 		let id = frame_sync.frame_id as usize;
 		let id_image = frame_sync.acquired_image_index as usize;
 		let cmd = &self.commands[id];
@@ -177,7 +170,9 @@ impl Pass for Back {
 			cmd.device.end_command_buffer(cmd.buffer);
 		}
 	}
+}
 
+impl Pass for Back {
 	fn buffer(&self, frame_sync: &FrameSync) -> vk::CommandBuffer {
 		let id = frame_sync.frame_id as usize;
 		self.commands[id].buffer

@@ -62,7 +62,7 @@ impl VulkanContext {
 #[derive(derive_more::Deref)]
 pub struct Instance {
     #[deref]
-    instance: ash::Instance,
+    pub(super) instance: ash::Instance,
     entry: ash::Entry,
 }
 
@@ -237,9 +237,9 @@ impl Drop for Surface {
 #[derive(derive_more::Deref)]
 pub struct Device {
     #[deref]
-    device: ash::Device,
+    pub(super) device: ash::Device,
     pub(super) physical_device: vk::PhysicalDevice,
-    pub graphics_queue_index: u32,
+    pub(super) graphics_queue_index: u32,
     pub graphics_queue: Mutex<vk::Queue>,
     instance: Arc<Instance>,
 }

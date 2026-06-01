@@ -42,8 +42,8 @@ impl Swapchain {
         let format = formats.into_iter()
             .min_by_key(|&f| {
                 match f.format {
-                    vk::Format::R8G8B8A8_SRGB => 0,
-                    vk::Format::R8G8B8A8_UNORM => 1,
+                    vk::Format::R8G8B8A8_SRGB => 1,
+                    vk::Format::R8G8B8A8_UNORM => 0,
                     _ => 2
                 }
             })

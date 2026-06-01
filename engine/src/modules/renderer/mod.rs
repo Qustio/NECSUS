@@ -7,6 +7,7 @@ pub mod buffer;
 pub mod mesh;
 pub mod pipeline;
 pub mod material;
+pub mod imgui;
 
 use std::error::Error;
 use shipyard::{AllStoragesViewMut, Label, UniqueView, UniqueViewMut, scheduler::IntoWorkloadTrySystem};
@@ -38,6 +39,10 @@ impl Module for RendererModule {
             System::new(Box::new(Render), render_record_back.into_workload_try_system()?)
             .label("Record")
         );
+		engine.systems.push(
+            System::new(Box::new(Render), render_record_imgui.into_workload_try_system()?)
+            .label("Record")
+        );
         engine.systems.push(
             System::new(Box::new(Render), render_submit.into_workload_try_system()?)
             .after("Record")
@@ -47,11 +52,23 @@ impl Module for RendererModule {
             .label("Wait idle")
         );
 		engine.systems.push(
+            System::new(Box::new(State::PreUpdate), imgui_handle_events.into_workload_try_system()?)
+        );
+		engine.systems.push(
             System::new(Box::new(State::PreUpdate), recreate_swapchain.into_workload_try_system()?)
             .label("Recreate swapchain")
         );
         Ok(())
     }
+}
+
+fn imgui_handle_events(
+	mut imgui_state: UniqueViewMut<imgui::ImguiState>,
+	events: UniqueView<modules::core::EventQueue<WindowEvent>>,
+	window: UniqueView<modules::window::Window>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+	imgui_state.handle_events(events, window)?;
+	Ok(())
 }
 
 fn render_start(
@@ -75,29 +92,41 @@ fn render_start(
 }
 
 fn render_record_main(
-	rame_sync: UniqueView<frame_sync::FrameSync>,
+	frame_sync: UniqueView<frame_sync::FrameSync>,
 	main_pass: UniqueView<pass::Main>,
 	swapchain: UniqueView<swapchain::Swapchain>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
-	main_pass.record(&rame_sync, &swapchain);
+	main_pass.record(&frame_sync, &swapchain);
     Ok(())
 }
 
 fn render_record_back(
-	rame_sync: UniqueView<frame_sync::FrameSync>,
+	frame_sync: UniqueView<frame_sync::FrameSync>,
 	back_pass: UniqueView<pass::Back>,
 	swapchain: UniqueView<swapchain::Swapchain>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
-	back_pass.record(&rame_sync, &swapchain);
+	back_pass.record(&frame_sync, &swapchain);
     Ok(())
 }
 
+fn render_record_imgui(
+	frame_sync: UniqueView<frame_sync::FrameSync>,
+	imgui_pass: UniqueView<imgui::ImguiState>,
+	swapchain: UniqueView<swapchain::Swapchain>,
+	mut draw_list: UniqueViewMut<imgui::UiDrawList>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+	let _span = tracy_client::span!();
+	_span.emit_color(0xFF6600);
+
+	imgui_pass.record(&frame_sync, &swapchain, &mut draw_list);
+    Ok(())
+}
 
 fn render_submit(
 	mut frame_sync: UniqueViewMut<frame_sync::FrameSync>,
@@ -105,12 +134,13 @@ fn render_submit(
 	swapchain: UniqueView<swapchain::Swapchain>,
 	main_pass: UniqueView<pass::Main>,
 	back_pass: UniqueView<pass::Back>,
+	imgui_pass: UniqueView<imgui::ImguiState>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let _span = tracy_client::span!();
 	_span.emit_color(0x5566AA);
 
 	
-	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &back_pass]);
+	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &back_pass, &imgui_pass]);
 	cmd_ctx.swapchain_to_present(&frame_sync, &swapchain)?;
 	cmd_ctx.end(&frame_sync)?;
 	frame_sync.submit(&cmd_ctx)?;
@@ -189,6 +219,15 @@ fn setup_renderer(
 		swapchain.frame_count,
 		swapchain.format.format,
 	)?;
+	let imgui_pass = imgui::ImguiState::new(
+		context.instance.clone(),
+		context.device.clone(),
+		swapchain.frame_count,
+		swapchain.format.format,
+		&window.window
+	)?;
+
+	let draw_list = imgui::UiDrawList::default();
 
     world.add_unique(context);
     world.add_unique(swapchain);
@@ -196,6 +235,8 @@ fn setup_renderer(
     world.add_unique(command_context);
 	world.add_unique(main_pass);
 	world.add_unique(back_pass);
+	world.add_unique(imgui_pass);
+	world.add_unique(draw_list);
 	
     Ok(())
 }

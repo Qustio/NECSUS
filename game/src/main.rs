@@ -3,8 +3,31 @@ use std::{env, error::Error};
 use color_eyre::owo_colors::OwoColorize;
 use tracing_subscriber::layer::SubscriberExt;
 use engine::*;
+use engine::modules::{Module, System, renderer::imgui::{UiDrawList, UiDrawable}};
+use shipyard::{UniqueViewMut, scheduler::IntoWorkloadSystem};
 use tracing::{self, level_filters::LevelFilter};
 use tracing_subscriber::{prelude::*, fmt};
+
+struct GameModule;
+impl Module for GameModule {
+    fn build(engine: &mut Engine) -> Result<(), Box<dyn std::error::Error>> {
+        engine.systems.push(
+            System::new(Box::new(State::Update), draw_ui.into_workload_system()?)
+        );
+        Ok(())
+    }
+}
+
+struct Demo;
+impl UiDrawable for Demo {
+    fn draw(&self, ui: &imgui::Ui) {
+        ui.show_demo_window(&mut true);
+    }
+}
+
+fn draw_ui(mut draw_list: UniqueViewMut<UiDrawList>) {
+    draw_list.items.push(Box::new(Demo));
+}
 
 
 
@@ -43,6 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .import::<modules::events::EventsModule>()?
         .import::<modules::window::WindowModule>()?
         .import::<modules::renderer::RendererModule>()?
+        .import::<GameModule>()?
         .run()?;
 
 	tracing::info!("close");

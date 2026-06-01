@@ -9,6 +9,9 @@ ash-window = "0.13.0"
 bytemuck = { version = "1.25.0", features = ["derive"] }
 derive_more = { version = "2.1.1", features = ["deref"] }
 hashbrown = "0.17.1"
+imgui = "0.12.0"
+imgui-rs-vulkan-renderer = { version = "1.16.0", features = ["dynamic-rendering"] }
+imgui-winit-support = { version = "0.13.0", git = "https://github.com/christat/imgui-winit-support" }
 itertools = "0.14.0"
 nalgebra = { version = "0.35.0", features = ["bytemuck"] }
 nalgebra-glm = "0.21.0"

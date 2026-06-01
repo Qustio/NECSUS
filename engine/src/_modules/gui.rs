@@ -170,7 +170,7 @@ impl Renderable for ImguiRenderable {
     }
 }
 
-pub type ImguiCallback = Box<dyn FnMut(&mut imgui::Ui) -> Result<(), Box<dyn Error>> + Send + Sync>;
+pub type ImguiCallback = Box<dyn FnOnce(&imgui::Ui) -> Result<(), Box<dyn Error>> + Send + Sync>;
 
 #[derive(Component)]
 pub struct ImguiContext(ImguiCallback);
