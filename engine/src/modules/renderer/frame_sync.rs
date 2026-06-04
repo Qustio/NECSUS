@@ -55,37 +55,6 @@ impl FrameSync {
 		};
 		Ok(())
 	}
-
-	pub(super) fn submit(
-		&self,
-		cmd_ctx: &CommandContext
-	) -> Result<(), Box<dyn Error + Send + Sync>> {
-		let _span = tracy_client::span!();
-		let frame = self.frame_id as usize;
-		unsafe {
-			let queue = self.device.graphics_queue
-				.lock()
-				.expect("couldnt lock queue");
-			self.device.queue_submit2(
-				*queue,
-				&[vk::SubmitInfo2::default()
-					.wait_semaphore_infos(&[vk::SemaphoreSubmitInfo::default()
-						.semaphore(self.image_availabe[frame])
-						.stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
-					])
-					.command_buffer_infos(&[vk::CommandBufferSubmitInfo::default()
-						.command_buffer(cmd_ctx.commands[frame].buffer)
-					])
-					.signal_semaphore_infos(&[vk::SemaphoreSubmitInfo::default()
-						.semaphore(self.render_finished[frame])
-						.stage_mask(vk::PipelineStageFlags2::ALL_GRAPHICS)
-					])
-				],
-				self.fences[frame]
-			)?;
-		};
-		Ok(())
-	}
 }
 
 impl Drop for FrameSync {

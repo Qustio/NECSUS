@@ -38,17 +38,17 @@ impl Swapchain {
         let formats = unsafe {
             surface.get_physical_device_surface_formats(device.physical_device, surface.surface)?
         };
-        tracing::debug!("image_formats: {:?}", formats);
+        tracing::debug!("image_formats: {:#?}", formats);
         let format = formats.into_iter()
             .min_by_key(|&f| {
                 match f.format {
-                    vk::Format::R8G8B8A8_SRGB => 1,
-                    vk::Format::R8G8B8A8_UNORM => 0,
+					vk::Format::R8G8B8A8_UNORM => 1,
+                    vk::Format::R8G8B8A8_SRGB => 0,
                     _ => 2
                 }
             })
             .ok_or("no suitable formats found")?;
-        tracing::debug!("selected image_formats: {:?}", format);
+        tracing::debug!("selected image_formats: {:#?}", format);
 
         let present_modes = unsafe {
             surface.get_physical_device_surface_present_modes(device.physical_device, surface.surface)?
@@ -80,7 +80,7 @@ impl Swapchain {
                     .image_color_space(format.color_space)
                     .image_extent(extent)
                     .image_array_layers(1)
-                    .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+                    .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
                     .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                     .pre_transform(capabilities.current_transform)
                     .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
@@ -171,7 +171,7 @@ impl Swapchain {
 					.image_color_space(self.format.color_space)
 					.image_extent(extent)
 					.image_array_layers(1)
-					.image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+					.image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
 					.image_sharing_mode(vk::SharingMode::EXCLUSIVE)
 					.pre_transform(capabilities.current_transform)
 					.composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)

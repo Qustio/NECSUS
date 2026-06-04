@@ -1,13 +1,15 @@
 pub mod modules;
 pub use imgui;
 pub use shipyard;
+pub use nalgebra;
+pub use nalgebra_glm;
 
 use std::error::Error;
 use hashbrown::HashMap;
 use shipyard::{Label, Workload, World, scheduler::{Label, SystemModificator}};
 use winit::{application::ApplicationHandler, event_loop::EventLoop};
 
-use crate::modules::{System, core::{AppData, EventQueue, EventRegistry}, renderer::Render};
+use crate::modules::{System, core::{AppData, EventQueue, EventRegistry}};
 
 pub struct Engine {
     world: World,
@@ -74,7 +76,7 @@ impl Engine {
             let state = system.state.dyn_clone();
             let wl = workloads.remove(&state).unwrap_or_else(|| Workload::new(state));
             let mut ws = system.workload;
-            
+
             if let Some(label) = system.label {
                 ws = ws.tag(label);
             }
@@ -86,7 +88,6 @@ impl Engine {
             }
             workloads.insert(system.state.dyn_clone(), wl.with_system(ws));
         }
-        
 
         workloads
             .drain()
@@ -106,31 +107,42 @@ impl Engine {
 impl ApplicationHandler for Engine {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let window = modules::window::Window::new(event_loop);
-        
+
         self.world.add_unique(window);
         self.world
             .add_unique(modules::components::Camera::default());
         self.world.run_workload(State::Startup).unwrap();
         self.register_event::<winit::event::WindowEvent>();
+		self.register_event::<winit::event::DeviceEvent>();
     }
 
     fn window_event(
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,
-        window_id: winit::window::WindowId,
+        _: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
-        let mut window_events = self
-            .world
-            .get_unique::<&mut modules::core::EventQueue<winit::event::WindowEvent>>()
-            .unwrap();
-        window_events.push(event.clone());
         if let winit::event::WindowEvent::CloseRequested = event {
             event_loop.exit();
         }
+		if let Ok(mut q) = self.world.get_unique::<&mut EventQueue<winit::event::WindowEvent>>() {
+			q.push(event);
+		}
     }
 
-    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+	fn device_event(
+		&mut self,
+		_: &winit::event_loop::ActiveEventLoop,
+		_: winit::event::DeviceId,
+		event: winit::event::DeviceEvent,
+	)
+	{
+		if let Ok(mut q) = self.world.get_unique::<&mut EventQueue<winit::event::DeviceEvent>>() {
+			q.push(event);
+		}
+	}
+
+    fn about_to_wait(&mut self, _: &winit::event_loop::ActiveEventLoop) {
         let _span = tracy_client::span!("EventLoop");
         for state in &self.states {
             if state.dyn_eq(&State::Startup) { continue; }
@@ -157,8 +169,8 @@ impl ApplicationHandler for Engine {
         let _ = event_loop;
     }
 
-    fn exiting(&mut self, e: &winit::event_loop::ActiveEventLoop) {
-        self.world.run_workload(State::Cleanup);
+    fn exiting(&mut self, _: &winit::event_loop::ActiveEventLoop) {
+        self.world.run_workload(State::Cleanup).unwrap();
         tracing::info!("Done cleaning");
     }
 

@@ -1,9 +1,9 @@
 use std::{error::Error, sync::Arc};
 
 use shipyard::{scheduler::IntoWorkloadSystem, *};
-use winit::{event::{KeyEvent, WindowEvent}, keyboard::KeyCode, window::Fullscreen};
+use winit::{event::{DeviceEvent, KeyEvent, WindowEvent}, keyboard::{KeyCode, PhysicalKey::Code}, window::Fullscreen};
 
-use crate::{modules::{Module, System}, Engine, State, *};
+use crate::{Engine, State, modules::{Module, System, renderer::imgui::UiDrawList}, *};
 
 #[derive(Debug)]
 pub struct WindowModule;
@@ -27,11 +27,10 @@ fn read_event(
 ) -> Result<(), Box<dyn Error>> {
     let _span = tracy_client::span!("read_event");
 	for event in events.events.iter() {
-		match &event {
-        winit::event::WindowEvent::KeyboardInput { 
+		if let winit::event::WindowEvent::KeyboardInput { 
             device_id,
             event: KeyEvent{
-                physical_key: winit::keyboard::PhysicalKey::Code(KeyCode::F11),
+                physical_key: Code(s),
                 logical_key,
                 text,
                 location,
@@ -40,52 +39,79 @@ fn read_event(
                 ..
             },
             is_synthetic
-        } => {
+        } = &event {
             tracing::info!(target: "input", "fullscreen");
-            let mon = window.window.current_monitor().unwrap();
-            let f = window.window.fullscreen();
-            if f.is_none() {
-                window.window.set_fullscreen(Some(Fullscreen::Borderless(Some(mon))));
-            } else {
-                window.window.set_fullscreen(None);
-            }
-            
+  			match s {
+  				KeyCode::F11 => {
+  					let mon = window.window.current_monitor().unwrap();
+  					let f = window.window.fullscreen();
+  					if f.is_none() {
+  						window.window.set_fullscreen(Some(Fullscreen::Borderless(Some(mon))));
+  					} else {
+  						window.window.set_fullscreen(None);
+  					}
+  				},
+  				KeyCode::AltLeft => {
+  					window.window.set_cursor_grab(winit::window::CursorGrabMode::Locked);
+  				}
+  				_ => {}
+  			}
         }
-        _ => ()
-    }
 	}
     Ok(())
 }
 
 fn move_cum(
 	events: UniqueView<modules::core::EventQueue<WindowEvent>>,
+	device_events: UniqueView<modules::core::EventQueue<DeviceEvent>>,
     mut camera: UniqueViewMut<modules::components::Camera>,
+	time: UniqueView<modules::core::Time>,
+	window: UniqueViewMut<Window>,
+	mut draw_list: UniqueViewMut<UiDrawList>,
 ) -> Result<(), Box<dyn Error>> {
-    let _span = tracy_client::span!("move_cum");
+    let _span = tracy_client::span!();
+	let dt = time.elapsed.as_secs_f32();
 	for event in events.events.iter() {
-		match &event {
-			winit::event::WindowEvent::KeyboardInput { 
-				device_id,
-				event: KeyEvent{
-					physical_key: winit::keyboard::PhysicalKey::Code(KeyCode::KeyW),
-					logical_key,
-					text,
-					location,
-					state,
-					repeat: false,
-					..
-				},
-				is_synthetic
-			} => {
-				tracing::info!(target: "input", "W");
-				tracing::error!(target: "camera","W");
-				// dont forget deltatime
-				camera.postition.x += 0.1;
-				camera.update();
-			}
-			_ => ()
+		if let winit::event::WindowEvent::KeyboardInput {
+			event: KeyEvent{
+				physical_key: winit::keyboard::PhysicalKey::Code(key),
+				state,
+				..
+			},
+			..
+		} = &event {
+			camera.process_movement(event, dt);
 		}
 	}
+	for event in device_events.events.iter() {
+		camera.process_rotation(event, dt, true);
+	}
+	let camera_c = camera.clone();
+	draw_list.items.push(Box::new(move |ui: &::imgui::Ui| {
+		ui.window("Camera")
+			.build(|| {
+				let pos = camera_c.position();
+				let rot = camera_c.rotation();
+				ui.text_colored(
+					[1.0, 0.0, 0.0, 1.0],
+					format!("x: {}", pos.x)
+				);
+				ui.text_colored(
+					[0.0, 1.0, 0.0, 1.0],
+					format!("y: {}", pos.y)
+				);
+				ui.text_colored(
+					[0.0, 0.0, 1.0, 1.0],
+					format!("z: {}", pos.z)
+				);
+				ui.text(
+					format!("pitch: {}", rot.0)
+				);
+				ui.text(
+					format!("yaw: {}", rot.1)
+				);
+			});
+	}));
     Ok(())
 }
 

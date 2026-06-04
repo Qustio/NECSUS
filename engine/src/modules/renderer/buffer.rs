@@ -1,4 +1,4 @@
-use std::{error::Error, sync::Arc};
+use std::{error::Error, marker::PhantomData, sync::Arc};
 
 use ash::*;
 use vk_mem::Alloc;
@@ -6,13 +6,14 @@ use vk_mem::Alloc;
 use super::vulkan_context::Allocator;
 
 
-pub struct Buffer {
+pub struct Buffer<T> {
 	buffer: vk::Buffer,
 	allocation: vk_mem::Allocation,
-	allocator: Arc<Allocator>
+	allocator: Arc<Allocator>,
+	_type: PhantomData<T>
 }
 
-impl Buffer {
+impl<T> Buffer<T> {
 	pub(super) fn new(
 		allocator: Arc<Allocator>,
 		size: vk::DeviceSize,
@@ -36,11 +37,12 @@ impl Buffer {
 		Ok(Self{
 			buffer,
 			allocation,
-			allocator
+			allocator,
+			_type: PhantomData
 		})
 	}
 
-	pub(super) fn from_slice<T: bytemuck::Pod>(
+	pub(super) fn from_slice(
 		allocator: Arc<Allocator>,
 		data: &[T],
         usage: vk::BufferUsageFlags,
@@ -62,9 +64,13 @@ impl Buffer {
 	pub(super) fn buffer(&self) -> vk::Buffer {
 		self.buffer
 	}
+
+	pub(super) fn allocation_info(&self) -> vk_mem::AllocationInfo {
+		self.allocator.get_allocation_info(&self.allocation)
+	}
 }
 
-impl Drop for Buffer {
+impl<T> Drop for Buffer<T> {
 	fn drop(&mut self) {
 		unsafe {
 			self.allocator.destroy_buffer(self.buffer, &mut self.allocation);

@@ -16,6 +16,12 @@ pub trait UiDrawable: Send + Sync {
     fn draw(&self, ui: &imgui::Ui);
 }
 
+impl<F: Fn(&imgui::Ui) + Send + Sync> UiDrawable for F {
+	fn draw(&self, ui: &imgui::Ui) {
+		self(ui)
+	}
+}
+
 #[derive(Unique, Default)]
 pub struct UiDrawList {
     pub items: Vec<Box<dyn UiDrawable + Send + Sync>>,

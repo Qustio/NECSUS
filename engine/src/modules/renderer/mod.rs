@@ -8,11 +8,12 @@ pub mod mesh;
 pub mod pipeline;
 pub mod material;
 pub mod imgui;
+pub mod debug_tools;
 
-use std::error::Error;
-use shipyard::{AllStoragesViewMut, Label, UniqueView, UniqueViewMut, scheduler::IntoWorkloadTrySystem};
+use std::{error::Error, sync::atomic::Ordering};
+use shipyard::{AllStoragesViewMut, Label, UniqueView, UniqueViewMut, View, scheduler::IntoWorkloadTrySystem};
 use winit::event::WindowEvent;
-use crate::{State, modules::{self, Module, System, core::AppData, renderer::pass::Pass, window::Window}};
+use crate::{State, modules::{self, Module, System, components, core::AppData, renderer::imgui::UiDrawList, window::Window}};
 
 pub struct RendererModule;
 
@@ -58,6 +59,10 @@ impl Module for RendererModule {
             System::new(Box::new(State::PreUpdate), recreate_swapchain.into_workload_try_system()?)
             .label("Recreate swapchain")
         );
+
+		engine.systems.push(
+            System::new(Box::new(State::Update), capture_frame_ui.into_workload_try_system()?)
+        );
         Ok(())
     }
 }
@@ -67,6 +72,8 @@ fn imgui_handle_events(
 	events: UniqueView<modules::core::EventQueue<WindowEvent>>,
 	window: UniqueView<modules::window::Window>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+	let _span = tracy_client::span!();
+
 	imgui_state.handle_events(events, window)?;
 	Ok(())
 }
@@ -91,21 +98,45 @@ fn render_start(
     Ok(())
 }
 
-fn render_record_main(
-	frame_sync: UniqueView<frame_sync::FrameSync>,
-	main_pass: UniqueView<pass::Main>,
-	swapchain: UniqueView<swapchain::Swapchain>,
+fn capture_frame_ui(
+	mut draw_list: UniqueViewMut<UiDrawList>,
+	capture: UniqueView<debug_tools::FrameCapture>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
-	main_pass.record(&frame_sync, &swapchain);
+	let pending = capture.pending.clone();
+	draw_list.items.push(Box::new(move |ui: &::imgui::Ui| {
+		ui.window("Capture frame")
+			.build(|| {
+				if ui.button("capture") {
+					tracing::info!("captured frame");
+					pending.store(true, Ordering::Relaxed);
+				}
+			});
+	}));
+    Ok(())
+}
+
+fn render_record_main(
+	frame_sync: UniqueView<frame_sync::FrameSync>,
+	main_pass: UniqueView<pass::main::Main>,
+	swapchain: UniqueView<swapchain::Swapchain>,
+	mesh_assets: UniqueView<mesh::MeshAssetManager>,
+	mesh_handles: View<mesh::MeshHandle>,
+	transforms: View<components::Transform>,
+	camera: UniqueView<components::Camera>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+	let _span = tracy_client::span!();
+	_span.emit_color(0xFF6600);
+
+	main_pass.record(&frame_sync, &swapchain, &mesh_assets, &mesh_handles, &transforms, &camera);
     Ok(())
 }
 
 fn render_record_back(
 	frame_sync: UniqueView<frame_sync::FrameSync>,
-	back_pass: UniqueView<pass::Back>,
+	back_pass: UniqueView<pass::back::Back>,
 	swapchain: UniqueView<swapchain::Swapchain>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
@@ -132,27 +163,28 @@ fn render_submit(
 	mut frame_sync: UniqueViewMut<frame_sync::FrameSync>,
 	cmd_ctx: UniqueView<command_context::CommandContext>,
 	swapchain: UniqueView<swapchain::Swapchain>,
-	main_pass: UniqueView<pass::Main>,
-	back_pass: UniqueView<pass::Back>,
+	main_pass: UniqueView<pass::main::Main>,
+	back_pass: UniqueView<pass::back::Back>,
 	imgui_pass: UniqueView<imgui::ImguiState>,
+	capture: UniqueView<debug_tools::FrameCapture>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let _span = tracy_client::span!();
 	_span.emit_color(0x5566AA);
 
 	
-	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &back_pass, &imgui_pass]);
-	cmd_ctx.swapchain_to_present(&frame_sync, &swapchain)?;
+	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &imgui_pass]);
+	cmd_ctx.swapchain_to_present(&frame_sync, &swapchain, &capture)?;
 	cmd_ctx.end(&frame_sync)?;
-	frame_sync.submit(&cmd_ctx)?;
+	cmd_ctx.submit(&frame_sync, &capture)?;
 	swapchain.present(&mut frame_sync)?;
 	tracy_client::frame_mark();
+	
     Ok(())
 }
 
 fn render_wait(
 	vulkan_context: UniqueViewMut<vulkan_context::VulkanContext>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    //tracing::debug!("rener: wait");
 	vulkan_context.device.wait()?;
     Ok(())
 }
@@ -161,7 +193,7 @@ fn recreate_swapchain(
 	mut swapchain: UniqueViewMut<swapchain::Swapchain>,
 	events: UniqueView<modules::core::EventQueue<WindowEvent>>
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let _span = tracy_client::span!("recreate_swapchain");
+    let _span = tracy_client::span!();
 
 	let new_size = events.events.iter().find_map(|e| match e {
         WindowEvent::Resized(size) => Some(*size),
@@ -170,13 +202,14 @@ fn recreate_swapchain(
 	if let Some(new_size) = new_size {
 		swapchain.recreate(new_size)?
 	}
-	
+
     Ok(())
 }
 
 fn setup_renderer(
     world: AllStoragesViewMut,
 ) -> Result<(), Box<dyn Error + Send + Sync>>  {
+	let _span = tracy_client::span!();
     let app_data = world.get_unique::<&AppData>()?;
     let window = world.get_unique::<&Window>()?;
     let size = window.window.inner_size();
@@ -208,12 +241,13 @@ fn setup_renderer(
         swapchain.frame_count,
     )?;
 
-	let main_pass = pass::Main::new(
+	// Create passes
+	let main_pass = pass::main::Main::new(
 		context.device.clone(),
 		swapchain.frame_count,
 		swapchain.format.format,
 	)?;
-	let back_pass = pass::Back::new(
+	let back_pass = pass::back::Back::new(
 		context.device.clone(),
 		context.allocator.clone(),
 		swapchain.frame_count,
@@ -228,6 +262,17 @@ fn setup_renderer(
 	)?;
 
 	let draw_list = imgui::UiDrawList::default();
+	let frame_capture = debug_tools::FrameCapture::new(
+		context.device.clone(),
+		context.allocator.clone(),
+		swapchain.format.format
+	)?;
+
+	let mesh_assets = mesh::MeshAssetManager::new(
+		context.allocator.clone(),
+	)?;
+
+	let camera = components::Camera::new();
 
     world.add_unique(context);
     world.add_unique(swapchain);
@@ -237,6 +282,9 @@ fn setup_renderer(
 	world.add_unique(back_pass);
 	world.add_unique(imgui_pass);
 	world.add_unique(draw_list);
+	world.add_unique(frame_capture);
+	world.add_unique(mesh_assets);
+	world.add_unique(camera);
 	
     Ok(())
 }
