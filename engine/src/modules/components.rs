@@ -1,13 +1,13 @@
 use bytemuck::{Pod, Zeroable};
-use shipyard::*;
 use nalgebra::{Matrix4, Point, Point3, Unit, UnitQuaternion};
 use nalgebra_glm::*;
+use shipyard::*;
 
 #[derive(Debug, Component, Clone, Copy)]
 #[repr(C)]
 pub struct Transform {
-    pub local: Mat4,
-    pub world: Mat4,
+	pub local: Mat4,
+	pub world: Mat4,
 }
 
 impl Default for Transform {
@@ -38,7 +38,7 @@ impl Default for Camera {
 			pitch: 0.0,
 			yaw: 0.0,
 			pitchd: 0.0,
-			yawd: 0.0
+			yawd: 0.0,
 		}
 	}
 }
@@ -46,7 +46,7 @@ impl Default for Camera {
 impl Camera {
 	pub fn update(&mut self) {
 		//glm::mat4 cameraRotation = getRotationMatrix();
-    	//position += glm::vec3(cameraRotation * glm::vec4(velocity * 0.5f, 0.f));
+		//position += glm::vec3(cameraRotation * glm::vec4(velocity * 0.5f, 0.f));
 		self.pitch += self.pitchd;
 		self.yaw += self.yawd;
 		let camera_rotation = self.rotation_matrix();
@@ -66,12 +66,14 @@ impl Camera {
 		let camera_translation = Mat4::identity().append_translation(&self.postition.coords);
 		let camera_rotation = self.rotation_matrix();
 		//return glm::inverse(cameraTranslation * cameraRotation);
-		(camera_translation * camera_rotation).try_inverse().unwrap()
+		(camera_translation * camera_rotation)
+			.try_inverse()
+			.unwrap()
 	}
 
 	fn rotation_matrix(&self) -> Mat4 {
 		// fairly typical FPS style camera. we join the pitch and yaw rotations into
-    	// the final rotation matrix
+		// the final rotation matrix
 
 		// glm::quat pitchRotation = glm::angleAxis(pitch, glm::vec3 { 1.f, 0.f, 0.f });
 		// glm::quat yawRotation = glm::angleAxis(yaw, glm::vec3 { 0.f, -1.f, 0.f });
@@ -85,4 +87,3 @@ impl Camera {
 		(yaw_rotation * pitch_rotation).into()
 	}
 }
-

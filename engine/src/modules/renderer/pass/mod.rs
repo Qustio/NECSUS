@@ -1,12 +1,12 @@
 use std::ops::Deref;
 
-use shipyard::{Unique, UniqueView};
 use ash::*;
+use shipyard::{Unique, UniqueView};
 
 use super::frame_sync::FrameSync;
 
-pub mod main;
 pub mod back;
+pub mod main;
 
 pub use super::*;
 

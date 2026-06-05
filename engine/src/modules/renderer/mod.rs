@@ -1,19 +1,27 @@
-pub mod vulkan_context;
-pub mod swapchain;
-pub mod frame_sync;
-pub mod command_context;
-pub mod pass;
 pub mod buffer;
-pub mod mesh;
-pub mod pipeline;
-pub mod material;
-pub mod imgui;
+pub mod command_context;
 pub mod debug_tools;
+pub mod frame_sync;
+pub mod imgui;
+pub mod material;
+pub mod mesh;
+pub mod pass;
+pub mod pipeline;
+pub mod swapchain;
+pub mod vulkan_context;
 
+use crate::{
+	State,
+	modules::{
+		self, Module, System, components, core::AppData, renderer::imgui::UiDrawList,
+		window::Window,
+	},
+};
+use shipyard::{
+	AllStoragesViewMut, Label, UniqueView, UniqueViewMut, View, scheduler::IntoWorkloadTrySystem,
+};
 use std::{error::Error, sync::atomic::Ordering};
-use shipyard::{AllStoragesViewMut, Label, UniqueView, UniqueViewMut, View, scheduler::IntoWorkloadTrySystem};
 use winit::event::WindowEvent;
-use crate::{State, modules::{self, Module, System, components, core::AppData, renderer::imgui::UiDrawList, window::Window}};
 
 pub struct RendererModule;
 
@@ -21,50 +29,72 @@ pub struct RendererModule;
 pub struct Render;
 
 impl Module for RendererModule {
-    fn build(engine: &mut crate::Engine) -> Result<(), Box<dyn std::error::Error>> {
-        let pos = engine.states.iter().position(|s| s.dyn_eq(&State::PostUpdate)).unwrap();
-        engine.states.insert(pos, Box::new(Render));
+	fn build(engine: &mut crate::Engine) -> Result<(), Box<dyn std::error::Error>> {
+		let pos = engine
+			.states
+			.iter()
+			.position(|s| s.dyn_eq(&State::PostUpdate))
+			.unwrap();
+		engine.states.insert(pos, Box::new(Render));
 
-        engine.systems.push(
-            System::new(Box::new(State::Startup), setup_renderer.into_workload_try_system()?)
-        );
-        engine.systems.push(
-            System::new(Box::new(Render), render_start.into_workload_try_system()?)
-            .before("Record")
-        );
+		engine.systems.push(System::new(
+			Box::new(State::Startup),
+			setup_renderer.into_workload_try_system()?,
+		));
 		engine.systems.push(
-            System::new(Box::new(Render), render_record_main.into_workload_try_system()?)
-            .label("Record")
-        );
+			System::new(Box::new(Render), render_start.into_workload_try_system()?)
+				.before("Record"),
+		);
 		engine.systems.push(
-            System::new(Box::new(Render), render_record_back.into_workload_try_system()?)
-            .label("Record")
-        );
+			System::new(
+				Box::new(Render),
+				render_record_main.into_workload_try_system()?,
+			)
+			.label("Record"),
+		);
 		engine.systems.push(
-            System::new(Box::new(Render), render_record_imgui.into_workload_try_system()?)
-            .label("Record")
-        );
-        engine.systems.push(
-            System::new(Box::new(Render), render_submit.into_workload_try_system()?)
-            .after("Record")
-        );
+			System::new(
+				Box::new(Render),
+				render_record_back.into_workload_try_system()?,
+			)
+			.label("Record"),
+		);
 		engine.systems.push(
-            System::new(Box::new(State::Cleanup), render_wait.into_workload_try_system()?)
-            .label("Wait idle")
-        );
+			System::new(
+				Box::new(Render),
+				render_record_imgui.into_workload_try_system()?,
+			)
+			.label("Record"),
+		);
 		engine.systems.push(
-            System::new(Box::new(State::PreUpdate), imgui_handle_events.into_workload_try_system()?)
-        );
+			System::new(Box::new(Render), render_submit.into_workload_try_system()?)
+				.after("Record"),
+		);
 		engine.systems.push(
-            System::new(Box::new(State::PreUpdate), recreate_swapchain.into_workload_try_system()?)
-            .label("Recreate swapchain")
-        );
+			System::new(
+				Box::new(State::Cleanup),
+				render_wait.into_workload_try_system()?,
+			)
+			.label("Wait idle"),
+		);
+		engine.systems.push(System::new(
+			Box::new(State::PreUpdate),
+			imgui_handle_events.into_workload_try_system()?,
+		));
+		engine.systems.push(
+			System::new(
+				Box::new(State::PreUpdate),
+				recreate_swapchain.into_workload_try_system()?,
+			)
+			.label("Recreate swapchain"),
+		);
 
-		engine.systems.push(
-            System::new(Box::new(State::Update), capture_frame_ui.into_workload_try_system()?)
-        );
-        Ok(())
-    }
+		engine.systems.push(System::new(
+			Box::new(State::Update),
+			capture_frame_ui.into_workload_try_system()?,
+		));
+		Ok(())
+	}
 }
 
 fn imgui_handle_events(
@@ -95,7 +125,7 @@ fn render_start(
 	// clearing image - can be one call
 	cmd_ctx.begin_rendering(&frame_sync, &swapchain)?;
 	cmd_ctx.end_rendering(&frame_sync)?;
-    Ok(())
+	Ok(())
 }
 
 fn capture_frame_ui(
@@ -107,15 +137,14 @@ fn capture_frame_ui(
 
 	let pending = capture.pending.clone();
 	draw_list.items.push(Box::new(move |ui: &::imgui::Ui| {
-		ui.window("Capture frame")
-			.build(|| {
-				if ui.button("capture") {
-					tracing::info!("captured frame");
-					pending.store(true, Ordering::Relaxed);
-				}
-			});
+		ui.window("Capture frame").build(|| {
+			if ui.button("capture") {
+				tracing::info!("captured frame");
+				pending.store(true, Ordering::Relaxed);
+			}
+		});
 	}));
-    Ok(())
+	Ok(())
 }
 
 fn render_record_main(
@@ -130,8 +159,15 @@ fn render_record_main(
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
-	main_pass.record(&frame_sync, &swapchain, &mesh_assets, &mesh_handles, &transforms, &camera);
-    Ok(())
+	main_pass.record(
+		&frame_sync,
+		&swapchain,
+		&mesh_assets,
+		&mesh_handles,
+		&transforms,
+		&camera,
+	);
+	Ok(())
 }
 
 fn render_record_back(
@@ -143,7 +179,7 @@ fn render_record_back(
 	_span.emit_color(0xFF6600);
 
 	back_pass.record(&frame_sync, &swapchain);
-    Ok(())
+	Ok(())
 }
 
 fn render_record_imgui(
@@ -156,7 +192,7 @@ fn render_record_imgui(
 	_span.emit_color(0xFF6600);
 
 	imgui_pass.record(&frame_sync, &swapchain, &mut draw_list);
-    Ok(())
+	Ok(())
 }
 
 fn render_submit(
@@ -168,78 +204,67 @@ fn render_submit(
 	imgui_pass: UniqueView<imgui::ImguiState>,
 	capture: UniqueView<debug_tools::FrameCapture>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let _span = tracy_client::span!();
+	let _span = tracy_client::span!();
 	_span.emit_color(0x5566AA);
 
-	
 	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &imgui_pass]);
 	cmd_ctx.swapchain_to_present(&frame_sync, &swapchain, &capture)?;
 	cmd_ctx.end(&frame_sync)?;
 	cmd_ctx.submit(&frame_sync, &capture)?;
 	swapchain.present(&mut frame_sync)?;
 	tracy_client::frame_mark();
-	
-    Ok(())
+
+	Ok(())
 }
 
 fn render_wait(
 	vulkan_context: UniqueViewMut<vulkan_context::VulkanContext>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	vulkan_context.device.wait()?;
-    Ok(())
+	Ok(())
 }
 
 fn recreate_swapchain(
 	mut swapchain: UniqueViewMut<swapchain::Swapchain>,
-	events: UniqueView<modules::core::EventQueue<WindowEvent>>
+	events: UniqueView<modules::core::EventQueue<WindowEvent>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let _span = tracy_client::span!();
+	let _span = tracy_client::span!();
 
 	let new_size = events.events.iter().find_map(|e| match e {
-        WindowEvent::Resized(size) => Some(*size),
-        _ => None,
-    });
+		WindowEvent::Resized(size) => Some(*size),
+		_ => None,
+	});
 	if let Some(new_size) = new_size {
 		swapchain.recreate(new_size)?
 	}
 
-    Ok(())
+	Ok(())
 }
 
-fn setup_renderer(
-    world: AllStoragesViewMut,
-) -> Result<(), Box<dyn Error + Send + Sync>>  {
+fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
-    let app_data = world.get_unique::<&AppData>()?;
-    let window = world.get_unique::<&Window>()?;
-    let size = window.window.inner_size();
+	let app_data = world.get_unique::<&AppData>()?;
+	let window = world.get_unique::<&Window>()?;
+	let size = window.window.inner_size();
 
-    // Create context
-    let context = vulkan_context::VulkanContext::new(
-        app_data.name,
-        app_data.version,
-        &window.window
-    )?;
+	// Create context
+	let context =
+		vulkan_context::VulkanContext::new(app_data.name, app_data.version, &window.window)?;
 
-    // Create swapchain
-    let swapchain = swapchain::Swapchain::new(
-        context.instance.clone(),
-        context.device.clone(),
-        context.surface.clone(),
-        size
-    )?;
+	// Create swapchain
+	let swapchain = swapchain::Swapchain::new(
+		context.instance.clone(),
+		context.device.clone(),
+		context.surface.clone(),
+		size,
+	)?;
 
-    // Frame sync data
-    let frame_sync = frame_sync::FrameSync::new(
-        context.device.clone(),
-        swapchain.frame_count
-    )?;
+	// Frame sync data
+	let frame_sync = frame_sync::FrameSync::new(context.device.clone(), swapchain.frame_count)?;
 
-    // Create command context
-    let command_context = command_context::CommandContext::new(
-        context.device.clone(),
-        swapchain.frame_count,
-    )?;
+	// Create command context
+	let command_context =
+		command_context::CommandContext::new(context.device.clone(), swapchain.frame_count)?;
 
 	// Create passes
 	let main_pass = pass::main::Main::new(
@@ -258,26 +283,24 @@ fn setup_renderer(
 		context.device.clone(),
 		swapchain.frame_count,
 		swapchain.format.format,
-		&window.window
+		&window.window,
 	)?;
 
 	let draw_list = imgui::UiDrawList::default();
 	let frame_capture = debug_tools::FrameCapture::new(
 		context.device.clone(),
 		context.allocator.clone(),
-		swapchain.format.format
+		swapchain.format.format,
 	)?;
 
-	let mesh_assets = mesh::MeshAssetManager::new(
-		context.allocator.clone(),
-	)?;
+	let mesh_assets = mesh::MeshAssetManager::new(context.allocator.clone())?;
 
 	let camera = components::Camera::default();
 
-    world.add_unique(context);
-    world.add_unique(swapchain);
-    world.add_unique(frame_sync);
-    world.add_unique(command_context);
+	world.add_unique(context);
+	world.add_unique(swapchain);
+	world.add_unique(frame_sync);
+	world.add_unique(command_context);
 	world.add_unique(main_pass);
 	world.add_unique(back_pass);
 	world.add_unique(imgui_pass);
@@ -285,6 +308,6 @@ fn setup_renderer(
 	world.add_unique(frame_capture);
 	world.add_unique(mesh_assets);
 	world.add_unique(camera);
-	
-    Ok(())
+
+	Ok(())
 }

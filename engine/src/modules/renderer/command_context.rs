@@ -2,87 +2,84 @@ use super::{debug_tools::FrameCapture, frame_sync::FrameSync, pass::Pass, swapch
 
 use super::vulkan_context::Device;
 use ash::*;
+use shipyard::Unique;
 use std::sync::atomic::Ordering;
 use std::{error::Error, sync::Arc};
-use shipyard::Unique;
 
 pub struct FrameCommand {
-    pub(super) buffer: vk::CommandBuffer,
+	pub(super) buffer: vk::CommandBuffer,
 	pub(super) pool: vk::CommandPool,
-    pub(super) device: Arc<Device>,
+	pub(super) device: Arc<Device>,
 }
 
 impl FrameCommand {
-    pub(super) fn new(
+	pub(super) fn new(
 		device: Arc<Device>,
 		level: vk::CommandBufferLevel,
 	) -> Result<Self, Box<dyn Error + Send + Sync>> {
 		let pool = unsafe {
-            device.create_command_pool(
-                &vk::CommandPoolCreateInfo::default()
-                    .queue_family_index(device.graphics_queue_index)
-                    .flags(vk::CommandPoolCreateFlags::TRANSIENT),
-                None,
-            )?
-        };
-        let buffer = unsafe {
-            device.allocate_command_buffers(
-                &vk::CommandBufferAllocateInfo::default()
-                    .command_buffer_count(1)
-                    .command_pool(pool)
-                    .level(level),
-            )?[0]
-        };
-        Ok(Self {
+			device.create_command_pool(
+				&vk::CommandPoolCreateInfo::default()
+					.queue_family_index(device.graphics_queue_index)
+					.flags(vk::CommandPoolCreateFlags::TRANSIENT),
+				None,
+			)?
+		};
+		let buffer = unsafe {
+			device.allocate_command_buffers(
+				&vk::CommandBufferAllocateInfo::default()
+					.command_buffer_count(1)
+					.command_pool(pool)
+					.level(level),
+			)?[0]
+		};
+		Ok(Self {
 			buffer,
 			pool,
-			device
+			device,
 		})
-    }
+	}
 }
 
-
 impl Drop for FrameCommand {
-    fn drop(&mut self) {
-        unsafe {
+	fn drop(&mut self) {
+		unsafe {
 			let _ = self.device.wait_queue();
-            self.device.destroy_command_pool(self.pool, None);
-        }
-    }
+			self.device.destroy_command_pool(self.pool, None);
+		}
+	}
 }
 
 #[derive(Unique)]
 pub struct CommandContext {
-    pub commands: Vec<FrameCommand>,
+	pub commands: Vec<FrameCommand>,
 	pub capture_frame: bool,
 }
 
 impl CommandContext {
-    pub(super) fn new(
-        device: Arc<Device>,
-        frame_count: u32,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let frames = (0..frame_count)
-            .map(|_| FrameCommand::new(device.clone(), vk::CommandBufferLevel::PRIMARY))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Self { commands: frames, capture_frame: false })
-    }
+	pub(super) fn new(
+		device: Arc<Device>,
+		frame_count: u32,
+	) -> Result<Self, Box<dyn Error + Send + Sync>> {
+		let frames = (0..frame_count)
+			.map(|_| FrameCommand::new(device.clone(), vk::CommandBufferLevel::PRIMARY))
+			.collect::<Result<Vec<_>, _>>()?;
+		Ok(Self {
+			commands: frames,
+			capture_frame: false,
+		})
+	}
 
-	pub(super) fn begin(
-		&self,
-		id: u32
-	) -> Result<(), Box<dyn Error + Send + Sync>> {
+	pub(super) fn begin(&self, id: u32) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let _span = tracy_client::span!();
 		let cmd = &self.commands[id as usize];
 		unsafe {
-			cmd.device.reset_command_pool(
-				cmd.pool,
-				vk::CommandPoolResetFlags::empty()
-			)?;
+			cmd.device
+				.reset_command_pool(cmd.pool, vk::CommandPoolResetFlags::empty())?;
 			cmd.device.begin_command_buffer(
 				cmd.buffer,
 				&vk::CommandBufferBeginInfo::default()
-					.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+					.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
 			)?;
 		}
 		Ok(())
@@ -118,8 +115,8 @@ impl CommandContext {
 						.old_layout(vk::ImageLayout::UNDEFINED)
 						.new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
 						.image(image)
-						.subresource_range(color_range)
-				])
+						.subresource_range(color_range),
+				]),
 			);
 		}
 		Ok(())
@@ -148,8 +145,7 @@ impl CommandContext {
 			if !capture.pending.load(Ordering::Relaxed) {
 				cmd.device.cmd_pipeline_barrier2(
 					cmd.buffer,
-					&
-					vk::DependencyInfo::default().image_memory_barriers(&[
+					&vk::DependencyInfo::default().image_memory_barriers(&[
 						vk::ImageMemoryBarrier2::default()
 							.src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
 							.dst_stage_mask(vk::PipelineStageFlags2::BOTTOM_OF_PIPE)
@@ -158,15 +154,14 @@ impl CommandContext {
 							.old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
 							.new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
 							.image(image)
-							.subresource_range(color_range)
-					])
+							.subresource_range(color_range),
+					]),
 				);
 			} else {
 				// swapchain: COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL
 				cmd.device.cmd_pipeline_barrier2(
 					cmd.buffer,
-					&
-					vk::DependencyInfo::default().image_memory_barriers(&[
+					&vk::DependencyInfo::default().image_memory_barriers(&[
 						vk::ImageMemoryBarrier2::default()
 							.src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
 							.dst_stage_mask(vk::PipelineStageFlags2::TRANSFER)
@@ -175,14 +170,13 @@ impl CommandContext {
 							.old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
 							.new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
 							.image(image)
-							.subresource_range(color_range)
-					])
+							.subresource_range(color_range),
+					]),
 				);
 				// capture image: UNDEFINED -> TRANSFER_DST_OPTIMAL
 				cmd.device.cmd_pipeline_barrier2(
 					cmd.buffer,
-					&
-					vk::DependencyInfo::default().image_memory_barriers(&[
+					&vk::DependencyInfo::default().image_memory_barriers(&[
 						vk::ImageMemoryBarrier2::default()
 							.src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
 							.dst_stage_mask(vk::PipelineStageFlags2::TRANSFER)
@@ -191,8 +185,8 @@ impl CommandContext {
 							.old_layout(vk::ImageLayout::UNDEFINED)
 							.new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
 							.image(capture.image.0)
-							.subresource_range(color_range)
-					])
+							.subresource_range(color_range),
+					]),
 				);
 				let blit_regions = &[vk::ImageBlit2::default()
 					.src_subresource(
@@ -204,7 +198,11 @@ impl CommandContext {
 					)
 					.src_offsets([
 						vk::Offset3D { x: 0, y: 0, z: 0 },
-						vk::Offset3D { x: swapchain.extent.width as i32, y: swapchain.extent.height as i32, z: 1 },
+						vk::Offset3D {
+							x: swapchain.extent.width as i32,
+							y: swapchain.extent.height as i32,
+							z: 1,
+						},
 					])
 					.dst_subresource(
 						vk::ImageSubresourceLayers::default()
@@ -215,7 +213,11 @@ impl CommandContext {
 					)
 					.dst_offsets([
 						vk::Offset3D { x: 0, y: 0, z: 0 },
-						vk::Offset3D { x: capture.extent.width as i32, y: capture.extent.height as i32, z: 1 },
+						vk::Offset3D {
+							x: capture.extent.width as i32,
+							y: capture.extent.height as i32,
+							z: 1,
+						},
 					])];
 				let blit_info = &vk::BlitImageInfo2::default()
 					.src_image(image)
@@ -229,8 +231,7 @@ impl CommandContext {
 				// capture image: TRANSFER_DST_OPTIMAL -> TRANSFER_SRC_OPTIMAL
 				cmd.device.cmd_pipeline_barrier2(
 					cmd.buffer,
-					&
-					vk::DependencyInfo::default().image_memory_barriers(&[
+					&vk::DependencyInfo::default().image_memory_barriers(&[
 						vk::ImageMemoryBarrier2::default()
 							.src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
 							.dst_stage_mask(vk::PipelineStageFlags2::TRANSFER)
@@ -239,19 +240,25 @@ impl CommandContext {
 							.old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
 							.new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
 							.image(capture.image.0)
-							.subresource_range(color_range)
-					])
+							.subresource_range(color_range),
+					]),
 				);
 				let region = vk::BufferImageCopy {
 					buffer_offset: 0,
-					buffer_row_length: 0,    // 0 = tightly packed (rows = width)
-					buffer_image_height: 0,  // 0 = tightly packed (height)
+					buffer_row_length: 0,   // 0 = tightly packed (rows = width)
+					buffer_image_height: 0, // 0 = tightly packed (height)
 					image_subresource: vk::ImageSubresourceLayers {
 						aspect_mask: vk::ImageAspectFlags::COLOR,
-						mip_level: 0, base_array_layer: 0, layer_count: 1,
+						mip_level: 0,
+						base_array_layer: 0,
+						layer_count: 1,
 					},
 					image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
-					image_extent: vk::Extent3D { width: capture.extent.width, height: capture.extent.height, depth: 1 },
+					image_extent: vk::Extent3D {
+						width: capture.extent.width,
+						height: capture.extent.height,
+						depth: 1,
+					},
 				};
 				// copy capture image
 				cmd.device.cmd_copy_image_to_buffer(
@@ -259,13 +266,12 @@ impl CommandContext {
 					capture.image.0,
 					vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
 					capture.buffer.buffer(),
-					&[region]
+					&[region],
 				);
 				// swapchain: TRANSFER_SRC_OPTIMAL -> PRESENT_SRC_KHR
 				cmd.device.cmd_pipeline_barrier2(
 					cmd.buffer,
-					&
-					vk::DependencyInfo::default().image_memory_barriers(&[
+					&vk::DependencyInfo::default().image_memory_barriers(&[
 						vk::ImageMemoryBarrier2::default()
 							.src_stage_mask(vk::PipelineStageFlags2::TRANSFER)
 							.dst_stage_mask(vk::PipelineStageFlags2::BOTTOM_OF_PIPE)
@@ -274,8 +280,8 @@ impl CommandContext {
 							.old_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
 							.new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
 							.image(image)
-							.subresource_range(color_range)
-					])
+							.subresource_range(color_range),
+					]),
 				);
 			}
 		}
@@ -304,25 +310,25 @@ impl CommandContext {
 						.load_op(vk::AttachmentLoadOp::CLEAR)
 						.store_op(vk::AttachmentStoreOp::STORE)
 						.clear_value(vk::ClearValue {
-							color: vk::ClearColorValue{
-								float32: [0.0; 4]
-							}
-						})
-					]),
+							color: vk::ClearColorValue { float32: [0.0; 4] },
+						})]),
 			);
 		}
 		Ok(())
 	}
 
-	pub(super) fn execute_commands(
-		&self,
-		frame_sync: &FrameSync,
-		cmds: &[&dyn Pass],
-	) {
+	pub(super) fn execute_commands(&self, frame_sync: &FrameSync, cmds: &[&dyn Pass]) {
 		let id = frame_sync.frame_id as usize;
 		let primary_cmd = &self.commands[id];
-		let buffers = cmds.iter().map(|cmd| cmd.buffer(frame_sync)).collect::<Vec<_>>();
-		unsafe { primary_cmd.device.cmd_execute_commands(primary_cmd.buffer, &buffers); }
+		let buffers = cmds
+			.iter()
+			.map(|cmd| cmd.buffer(frame_sync))
+			.collect::<Vec<_>>();
+		unsafe {
+			primary_cmd
+				.device
+				.cmd_execute_commands(primary_cmd.buffer, &buffers);
+		}
 	}
 
 	pub(super) fn end_rendering(
@@ -338,17 +344,12 @@ impl CommandContext {
 		Ok(())
 	}
 
-	pub(super) fn end(
-		&self,
-		frame_sync: &FrameSync
-	) -> Result<(), Box<dyn Error + Send + Sync>> {
+	pub(super) fn end(&self, frame_sync: &FrameSync) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let _span = tracy_client::span!();
 		let id = frame_sync.frame_id as usize;
-		let cmd = &self.commands[id as usize];
+		let cmd = &self.commands[id];
 		unsafe {
-			cmd.device.end_command_buffer(
-				cmd.buffer
-			)?;
+			cmd.device.end_command_buffer(cmd.buffer)?;
 		}
 		Ok(())
 	}
@@ -362,7 +363,9 @@ impl CommandContext {
 		let frame = frame_sync.frame_id as usize;
 		let cmd = &self.commands[frame];
 		unsafe {
-			let queue = cmd.device.graphics_queue
+			let queue = cmd
+				.device
+				.graphics_queue
 				.lock()
 				.expect("couldnt lock queue");
 			cmd.device.queue_submit2(
@@ -370,21 +373,22 @@ impl CommandContext {
 				&[vk::SubmitInfo2::default()
 					.wait_semaphore_infos(&[vk::SemaphoreSubmitInfo::default()
 						.semaphore(frame_sync.image_availabe[frame])
-						.stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
-					])
-					.command_buffer_infos(&[vk::CommandBufferSubmitInfo::default()
-						.command_buffer(cmd.buffer)
+						.stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)])
+					.command_buffer_infos(&[
+						vk::CommandBufferSubmitInfo::default().command_buffer(cmd.buffer)
 					])
 					.signal_semaphore_infos(&[vk::SemaphoreSubmitInfo::default()
 						.semaphore(frame_sync.render_finished[frame])
-						.stage_mask(vk::PipelineStageFlags2::ALL_GRAPHICS)
-					])
-				],
-				frame_sync.fences[frame]
+						.stage_mask(vk::PipelineStageFlags2::ALL_GRAPHICS)])],
+				frame_sync.fences[frame],
 			)?;
-			let exchange = capture.pending.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed).unwrap_or(false);
+			let exchange = capture
+				.pending
+				.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed)
+				.unwrap_or(false);
 			if exchange {
-				cmd.device.wait_for_fences(&[frame_sync.fences[frame]], true, u64::MAX)?;
+				cmd.device
+					.wait_for_fences(&[frame_sync.fences[frame]], true, u64::MAX)?;
 				capture.copy()?;
 			}
 		};

@@ -1,18 +1,18 @@
-use std::{error::Error, sync::Arc};
 use ash::*;
 use bytemuck::bytes_of;
 use nalgebra_glm::Mat4;
 use shipyard::{IntoIter, Unique, View};
+use std::{error::Error, sync::Arc};
 
+use super::Pass;
+use super::command_context::FrameCommand;
 use super::components;
+use super::frame_sync::FrameSync;
+use super::mesh;
 use super::mesh::Vertex;
 use super::mesh::VertexDescription;
-use super::Pass;
-use super::mesh;
 use super::swapchain::Swapchain;
-use super::frame_sync::FrameSync;
 use super::vulkan_context::Device;
-use super::command_context::FrameCommand;
 
 #[derive(Unique)]
 pub(in super::super) struct Main {
@@ -33,24 +33,17 @@ impl DrawConstants {
 	fn new(
 		extent: &vk::Extent2D,
 		camera: &components::Camera,
-		transform: &components::Transform
+		transform: &components::Transform,
 	) -> Self {
 		let aspect = extent.width as f32 / extent.height as f32;
 		let mut proj = nalgebra_glm::perspective_rh_zo(aspect, 90_f32.to_radians(), 0.1, 100.0);
 		let rev_z_matrix = Mat4::new(
-            1.0, 0.0, 0.0, 0.0,
-            0.0, -1.0, 0.0, 0.0,
-            0.0, 0.0, -1.0, 0.0,
-            0.0, 0.0, 1.0, 1.0
-        );
-        proj*=rev_z_matrix;
+			1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0,
+		);
+		proj *= rev_z_matrix;
 		let view = camera.view_matrix();
 		let model = transform.local;
-		Self {
-			model,
-			view,
-			proj,
-		}
+		Self { model, view, proj }
 	}
 }
 
@@ -60,19 +53,16 @@ impl Main {
 		frame_count: u32,
 		image_format: vk::Format,
 	) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let commands = (0..frame_count)
-            .map(|_| FrameCommand::new(device.clone(), vk::CommandBufferLevel::SECONDARY))
-            .collect::<Result<Vec<_>, _>>()?;
-		let pipeline = Pipeline::new(
-			device,
-			image_format
-		)?;
-        Ok(Self{
+		let commands = (0..frame_count)
+			.map(|_| FrameCommand::new(device.clone(), vk::CommandBufferLevel::SECONDARY))
+			.collect::<Result<Vec<_>, _>>()?;
+		let pipeline = Pipeline::new(device, image_format)?;
+		Ok(Self {
 			commands,
 			pipeline,
 			image_format,
 		})
-    }
+	}
 
 	pub(in super::super) fn record(
 		&self,
@@ -89,17 +79,19 @@ impl Main {
 		let image_view = swapchain.image_views[id_image];
 		unsafe {
 			// reset all buffers in pool
-			cmd.device.reset_command_pool(cmd.pool, vk::CommandPoolResetFlags::empty());
+			cmd.device
+				.reset_command_pool(cmd.pool, vk::CommandPoolResetFlags::empty());
 			cmd.device.begin_command_buffer(
 				cmd.buffer,
 				&vk::CommandBufferBeginInfo::default()
 					.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
-					.inheritance_info(&vk::CommandBufferInheritanceInfo::default()
-					.push_next(&mut vk::CommandBufferInheritanceRenderingInfo::default()
-						.color_attachment_formats(&[self.image_format])
-						.rasterization_samples(vk::SampleCountFlags::TYPE_1)
-					)
-				)
+					.inheritance_info(
+						&vk::CommandBufferInheritanceInfo::default().push_next(
+							&mut vk::CommandBufferInheritanceRenderingInfo::default()
+								.color_attachment_formats(&[self.image_format])
+								.rasterization_samples(vk::SampleCountFlags::TYPE_1),
+						),
+					),
 			);
 			cmd.device.cmd_begin_rendering(
 				cmd.buffer,
@@ -110,21 +102,33 @@ impl Main {
 						.image_view(image_view)
 						.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
 						.load_op(vk::AttachmentLoadOp::LOAD)
-						.store_op(vk::AttachmentStoreOp::STORE)
-					]),
+						.store_op(vk::AttachmentStoreOp::STORE)]),
 			);
-			cmd.device.cmd_set_viewport(cmd.buffer, 0, &[vk::Viewport {
-				x: 0.0, y: 0.0,
-				width: swapchain.extent.width as f32,
-				height: swapchain.extent.height as f32,
-				min_depth: 0.0,
-				max_depth: 1.0,
-			}]);
-			cmd.device.cmd_set_scissor(cmd.buffer, 0, &[vk::Rect2D {
-				offset: vk::Offset2D { x: 0, y: 0 },
-				extent: swapchain.extent,
-			}]);
-			cmd.device.cmd_bind_pipeline(cmd.buffer, vk::PipelineBindPoint::GRAPHICS, self.pipeline.pipeline());
+			cmd.device.cmd_set_viewport(
+				cmd.buffer,
+				0,
+				&[vk::Viewport {
+					x: 0.0,
+					y: 0.0,
+					width: swapchain.extent.width as f32,
+					height: swapchain.extent.height as f32,
+					min_depth: 0.0,
+					max_depth: 1.0,
+				}],
+			);
+			cmd.device.cmd_set_scissor(
+				cmd.buffer,
+				0,
+				&[vk::Rect2D {
+					offset: vk::Offset2D { x: 0, y: 0 },
+					extent: swapchain.extent,
+				}],
+			);
+			cmd.device.cmd_bind_pipeline(
+				cmd.buffer,
+				vk::PipelineBindPoint::GRAPHICS,
+				self.pipeline.pipeline(),
+			);
 
 			// meshes
 			for (mesh, trans) in (mesh_handles, transforms).iter() {
@@ -132,10 +136,27 @@ impl Main {
 					continue;
 				};
 				let constant = DrawConstants::new(&swapchain.extent, camera, trans);
-				cmd.device.cmd_push_constants(cmd.buffer, self.pipeline.layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&constant));
-				cmd.device.cmd_bind_vertex_buffers(cmd.buffer, 0, &[mesh_data.vertex_buffer()], &[0]);
-				cmd.device.cmd_bind_index_buffer(cmd.buffer, mesh_data.index_buffer(), 0, vk::IndexType::UINT32);
-				cmd.device.cmd_draw_indexed(cmd.buffer, mesh_data.index_count(), 1, 0, 0, 0);
+				cmd.device.cmd_push_constants(
+					cmd.buffer,
+					self.pipeline.layout,
+					vk::ShaderStageFlags::VERTEX,
+					0,
+					bytes_of(&constant),
+				);
+				cmd.device.cmd_bind_vertex_buffers(
+					cmd.buffer,
+					0,
+					&[mesh_data.vertex_buffer()],
+					&[0],
+				);
+				cmd.device.cmd_bind_index_buffer(
+					cmd.buffer,
+					mesh_data.index_buffer(),
+					0,
+					vk::IndexType::UINT32,
+				);
+				cmd.device
+					.cmd_draw_indexed(cmd.buffer, mesh_data.index_count(), 1, 0, 0, 0);
 			}
 
 			cmd.device.cmd_end_rendering(cmd.buffer);
@@ -155,14 +176,14 @@ pub struct Pipeline {
 	pipeline: vk::Pipeline,
 	layout: vk::PipelineLayout,
 	shader: vk::ShaderModule,
-	device: Arc<Device>
+	device: Arc<Device>,
 }
 
 impl Pipeline {
 	pub(super) fn new(
 		device: Arc<Device>,
 		image_format: vk::Format,
-	)  -> Result<Self, Box<dyn Error + Send + Sync>> {
+	) -> Result<Self, Box<dyn Error + Send + Sync>> {
 		let push_range = vk::PushConstantRange::default()
 			.stage_flags(vk::ShaderStageFlags::VERTEX)
 			.offset(0)
@@ -172,19 +193,16 @@ impl Pipeline {
 				&vk::PipelineLayoutCreateInfo::default()
 					.set_layouts(&[])
 					.push_constant_ranges(&[push_range]),
-				None
+				None,
 			)?
 		};
 
 		let shader = unsafe {
 			let exe = std::env::current_exe()?;
-			let mut file = std::fs::File::open(exe.parent().unwrap().join("shaders").join("main.slang"))?;
+			let mut file =
+				std::fs::File::open(exe.parent().unwrap().join("shaders").join("main.slang"))?;
 			let spv = util::read_spv(&mut file)?;
-			device.create_shader_module(
-				&vk::ShaderModuleCreateInfo::default()
-					.code(&spv),
-				None
-			)?
+			device.create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spv), None)?
 		};
 
 		let pipeline = {
@@ -223,7 +241,7 @@ impl Pipeline {
 				.line_width(1.0);
 
 			let multisample = vk::PipelineMultisampleStateCreateInfo::default()
-    			.rasterization_samples(vk::SampleCountFlags::TYPE_1);
+				.rasterization_samples(vk::SampleCountFlags::TYPE_1);
 
 			let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
 				.blend_enable(true)
@@ -237,12 +255,12 @@ impl Pipeline {
 
 			let attachments = [blend_attachment];
 
-			let color_blend = vk::PipelineColorBlendStateCreateInfo::default()
-				.attachments(&attachments);
+			let color_blend =
+				vk::PipelineColorBlendStateCreateInfo::default().attachments(&attachments);
 
 			let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-			let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
-				.dynamic_states(&dynamic_states);
+			let dynamic_state =
+				vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
 			let attachment_formats = [image_format];
 
@@ -260,18 +278,19 @@ impl Pipeline {
 				.dynamic_state(&dynamic_state)
 				.layout(layout)
 				.push_next(&mut rendering_info);
-			
+
 			unsafe {
-				device.create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)
+				device
+					.create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)
 					.map_err(|(_, e)| e)?[0]
 			}
 		};
-		
-		Ok(Self{
+
+		Ok(Self {
 			pipeline,
 			layout,
 			shader,
-			device
+			device,
 		})
 	}
 

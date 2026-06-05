@@ -1,7 +1,6 @@
-use std::sync::Arc;
-use ash::*;
 use super::vulkan_context::Device;
-
+use ash::*;
+use std::sync::Arc;
 
 struct Material {
 	device: Arc<Device>,
