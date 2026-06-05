@@ -10,6 +10,7 @@ bytemuck = { version = "1.25.0", features = ["derive"] }
 derive_more = { version = "2.1.1", features = ["deref"] }
 gltf = "1.4.1"
 hashbrown = "0.17.1"
+hassle-rs = "0.12.0"
 imgui = "0.12.0"
 imgui-rs-vulkan-renderer = { version = "1.16.0", features = ["dynamic-rendering"] }
 imgui-winit-support = { version = "0.13.0", git = "https://github.com/christat/imgui-winit-support" }
@@ -23,5 +24,7 @@ tracy-client = "0.18.4"
 vk-mem = "0.5.0"
 winit = "0.30.13"
 
-[build-dependencies]
 slang = { version = "0.1.0", git = "https://github.com/FloatyMonkey/slang-rs", package = "shader-slang" }
+
+[build-dependencies]
+

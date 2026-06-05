@@ -21,5 +21,5 @@ VSOutput vertMain(VSInput input)
 [shader("fragment")]
 float4 fragMain(VSOutput input) : SV_Target
 {
-    return float4(0.0, input.ndc.x/4, 0.0, input.ndc.x);
+    return float4(0.0, input.ndc.x / 4, 0.0, input.ndc.x);
 }

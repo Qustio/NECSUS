@@ -198,11 +198,9 @@ impl Pipeline {
 		};
 
 		let shader = unsafe {
-			let exe = std::env::current_exe()?;
-			let mut file =
-				std::fs::File::open(exe.parent().unwrap().join("shaders").join("main.slang"))?;
-			let spv = util::read_spv(&mut file)?;
-			device.create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spv), None)?
+			let blob = super::build_shader("engine/shaders/main.slang", &["vertMain", "fragMain"])?;
+			let spv: &[u32] = bytemuck::cast_slice(blob.as_slice());
+			device.create_shader_module(&vk::ShaderModuleCreateInfo::default().code(spv), None)?
 		};
 
 		let pipeline = {

@@ -198,14 +198,14 @@ fn render_submit(
 	cmd_ctx: UniqueView<command_context::CommandContext>,
 	swapchain: UniqueView<swapchain::Swapchain>,
 	main_pass: UniqueView<pass::main::Main>,
-	_back_pass: UniqueView<pass::back::Back>,
+	back_pass: UniqueView<pass::back::Back>,
 	imgui_pass: UniqueView<imgui::ImguiState>,
 	capture: UniqueView<debug_tools::FrameCapture>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0x5566AA);
 
-	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &imgui_pass]);
+	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &back_pass, &imgui_pass]);
 	cmd_ctx.swapchain_to_present(&frame_sync, &swapchain, &capture)?;
 	cmd_ctx.end(&frame_sync)?;
 	cmd_ctx.submit(&frame_sync, &capture)?;
