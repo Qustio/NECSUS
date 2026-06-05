@@ -75,7 +75,7 @@ fn move_cum(
 	mut draw_list: UniqueViewMut<UiDrawList>,
 ) -> Result<(), Box<dyn Error>> {
 	let _span = tracy_client::span!();
-	let dt = time.elapsed.as_secs_f32();
+	let dt = time.delta.as_secs_f32();
 	let speed = 5.0;
 	let sens = 0.002;
 	for event in events.events.iter() {
