@@ -83,7 +83,7 @@ impl Swapchain {
                     .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
                     .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                     .pre_transform(capabilities.current_transform)
-                    .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+                    .composite_alpha(vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED)
                     .present_mode(present_mode)
                     .clipped(true),
                 None
@@ -174,7 +174,7 @@ impl Swapchain {
 					.image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
 					.image_sharing_mode(vk::SharingMode::EXCLUSIVE)
 					.pre_transform(capabilities.current_transform)
-					.composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+					.composite_alpha(vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED)
 					.present_mode(self.present_mode)
 					.clipped(true)
 					.old_swapchain(old_swapchain),  // ← key difference from new()

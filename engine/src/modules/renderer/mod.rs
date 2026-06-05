@@ -272,7 +272,7 @@ fn setup_renderer(
 		context.allocator.clone(),
 	)?;
 
-	let camera = components::Camera::new();
+	let camera = components::Camera::default();
 
     world.add_unique(context);
     world.add_unique(swapchain);

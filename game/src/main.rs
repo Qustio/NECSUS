@@ -50,6 +50,10 @@ fn spawn_objects(
 		(&mut mesh_handles, &mut transform),
 		(MeshHandle("Cube.0".to_string()), d)
 	);
+	entities.add_entity(
+		(&mut mesh_handles, &mut transform),
+		(MeshHandle("Suzanne.0".to_string()), Transform::default())
+	);
 }
 
 

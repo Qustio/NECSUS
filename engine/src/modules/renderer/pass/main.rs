@@ -35,11 +35,17 @@ impl DrawConstants {
 		camera: &components::Camera,
 		transform: &components::Transform
 	) -> Self {
-		let model = transform.local;
+		let aspect = extent.width as f32 / extent.height as f32;
+		let mut proj = nalgebra_glm::perspective_rh_zo(aspect, 90_f32.to_radians(), 0.1, 100.0);
+		let rev_z_matrix = Mat4::new(
+            1.0, 0.0, 0.0, 0.0,
+            0.0, -1.0, 0.0, 0.0,
+            0.0, 0.0, -1.0, 0.0,
+            0.0, 0.0, 1.0, 1.0
+        );
+        proj*=rev_z_matrix;
 		let view = camera.view_matrix();
-		let aspect: f32 = extent.width as f32 / extent.height as f32;
-		let mut proj = camera.projection_matrix(aspect, 0.1, 10000000.0);
-        proj[(1, 1)] *= -1.0;
+		let model = transform.local;
 		Self {
 			model,
 			view,
@@ -126,7 +132,6 @@ impl Main {
 					continue;
 				};
 				let constant = DrawConstants::new(&swapchain.extent, camera, trans);
-				tracing::info!("constant: {:#?}", constant);
 				cmd.device.cmd_push_constants(cmd.buffer, self.pipeline.layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&constant));
 				cmd.device.cmd_bind_vertex_buffers(cmd.buffer, 0, &[mesh_data.vertex_buffer()], &[0]);
 				cmd.device.cmd_bind_index_buffer(cmd.buffer, mesh_data.index_buffer(), 0, vk::IndexType::UINT32);
@@ -214,7 +219,7 @@ impl Pipeline {
 			let rasterization = vk::PipelineRasterizationStateCreateInfo::default()
 				.polygon_mode(vk::PolygonMode::FILL)
 				.cull_mode(vk::CullModeFlags::NONE)
-				.front_face(vk::FrontFace::CLOCKWISE)
+				.front_face(vk::FrontFace::COUNTER_CLOCKWISE)
 				.line_width(1.0);
 
 			let multisample = vk::PipelineMultisampleStateCreateInfo::default()

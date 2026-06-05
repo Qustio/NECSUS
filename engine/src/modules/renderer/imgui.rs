@@ -24,7 +24,7 @@ impl<F: Fn(&imgui::Ui) + Send + Sync> UiDrawable for F {
 
 #[derive(Unique, Default)]
 pub struct UiDrawList {
-    pub items: Vec<Box<dyn UiDrawable + Send + Sync>>,
+    pub items: Vec<Box<dyn UiDrawable>>,
 }
 
 #[derive(Unique)]

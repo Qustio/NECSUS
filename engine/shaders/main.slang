@@ -25,7 +25,7 @@ VSOutput vertMain(VSInput input)
 {
     VSOutput output;
     output.position = mul(pc.proj, mul(pc.view, mul(pc.model, float4(input.pos.xyz, 1.0))));
-    output.ndc = input.color * float4(input.normal, 1.0);
+    output.ndc = float4(input.normal, 1.0);
     //output.position.w = 1.0;
     return output;
 }
@@ -33,5 +33,5 @@ VSOutput vertMain(VSInput input)
 [shader("fragment")]
 float4 fragMain(VSOutput input) : SV_Target
 {
-    return float4(1.0, 0.0, 0.0, 1.0);
+    return input.ndc;
 }

@@ -1,7 +1,7 @@
 use std::{error::Error, sync::Arc};
 
 use shipyard::{scheduler::IntoWorkloadSystem, *};
-use winit::{event::{DeviceEvent, KeyEvent, WindowEvent}, keyboard::{KeyCode, PhysicalKey::Code}, window::Fullscreen};
+use winit::{event::{DeviceEvent, KeyEvent, WindowEvent}, keyboard::KeyCode, window::Fullscreen};
 
 use crate::{Engine, State, modules::{Module, System, renderer::imgui::UiDrawList}, *};
 
@@ -27,10 +27,11 @@ fn read_event(
 ) -> Result<(), Box<dyn Error>> {
     let _span = tracy_client::span!("read_event");
 	for event in events.events.iter() {
-		if let winit::event::WindowEvent::KeyboardInput { 
+		match &event {
+        winit::event::WindowEvent::KeyboardInput { 
             device_id,
             event: KeyEvent{
-                physical_key: Code(s),
+                physical_key: winit::keyboard::PhysicalKey::Code(KeyCode::F11),
                 logical_key,
                 text,
                 location,
@@ -39,24 +40,19 @@ fn read_event(
                 ..
             },
             is_synthetic
-        } = &event {
+        } => {
             tracing::info!(target: "input", "fullscreen");
-  			match s {
-  				KeyCode::F11 => {
-  					let mon = window.window.current_monitor().unwrap();
-  					let f = window.window.fullscreen();
-  					if f.is_none() {
-  						window.window.set_fullscreen(Some(Fullscreen::Borderless(Some(mon))));
-  					} else {
-  						window.window.set_fullscreen(None);
-  					}
-  				},
-  				KeyCode::AltLeft => {
-  					window.window.set_cursor_grab(winit::window::CursorGrabMode::Locked);
-  				}
-  				_ => {}
-  			}
+            let mon = window.window.current_monitor().unwrap();
+            let f = window.window.fullscreen();
+            if f.is_none() {
+                window.window.set_fullscreen(Some(Fullscreen::Borderless(Some(mon))));
+            } else {
+                window.window.set_fullscreen(None);
+            }
+            
         }
+        _ => ()
+    }
 	}
     Ok(())
 }
@@ -71,44 +67,69 @@ fn move_cum(
 ) -> Result<(), Box<dyn Error>> {
     let _span = tracy_client::span!();
 	let dt = time.elapsed.as_secs_f32();
+	let speed = 5.0;
+	let sens = 0.002;
 	for event in events.events.iter() {
 		if let winit::event::WindowEvent::KeyboardInput {
 			event: KeyEvent{
 				physical_key: winit::keyboard::PhysicalKey::Code(key),
 				state,
+				repeat: false,
 				..
 			},
 			..
 		} = &event {
-			camera.process_movement(event, dt);
+			let pressed = *state == winit::event::ElementState::Pressed;
+			match key {
+				KeyCode::KeyW => camera.velocity.z = if pressed { 1.0 } else { 0.0 },
+				KeyCode::KeyS => camera.velocity.z = if pressed { -1.0 } else { 0.0 },
+				KeyCode::KeyA => camera.velocity.x = if pressed { -1.0 } else { 0.0 },
+				KeyCode::KeyD => camera.velocity.x = if pressed { 1.0 } else { 0.0 },
+				KeyCode::AltLeft => {
+					if !pressed {
+						window.window.set_cursor_grab(winit::window::CursorGrabMode::Locked).ok();
+						window.window.set_cursor_visible(false);
+					}
+				}
+				_ => {}
+			}
 		}
 	}
 	for event in device_events.events.iter() {
-		camera.process_rotation(event, dt, true);
+		if let winit::event::DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+			camera.yawd = -*dx as f32 * sens;
+			camera.pitchd = *dy as f32 * sens;
+		}
 	}
+
+	let scaled = camera.velocity * speed * dt;
+	let saved = camera.velocity;
+	camera.velocity = scaled;
+	camera.update();
+	camera.velocity = saved;
+	camera.pitchd = 0.0;
+	camera.yawd = 0.0;
 	let camera_c = camera.clone();
 	draw_list.items.push(Box::new(move |ui: &::imgui::Ui| {
 		ui.window("Camera")
 			.build(|| {
-				let pos = camera_c.position();
-				let rot = camera_c.rotation();
 				ui.text_colored(
 					[1.0, 0.0, 0.0, 1.0],
-					format!("x: {}", pos.x)
+					format!("x: {}", camera_c.postition.x)
 				);
 				ui.text_colored(
 					[0.0, 1.0, 0.0, 1.0],
-					format!("y: {}", pos.y)
+					format!("y: {}", camera_c.postition.y)
 				);
 				ui.text_colored(
 					[0.0, 0.0, 1.0, 1.0],
-					format!("z: {}", pos.z)
+					format!("z: {}", camera_c.postition.z)
 				);
 				ui.text(
-					format!("pitch: {}", rot.0)
+					format!("pitch: {}", camera_c.pitch)
 				);
 				ui.text(
-					format!("yaw: {}", rot.1)
+					format!("yaw: {}", camera_c.yaw)
 				);
 			});
 	}));
@@ -126,7 +147,7 @@ impl Window {
         let window = event_loop
             .create_window(
                 winit::window::Window::default_attributes()
-                    .with_title("UWUEngine")
+                    .with_title("NECSUS")
                     .with_decorations(true)
                     .with_transparent(true),
             )
