@@ -2,12 +2,10 @@ use shipyard::*;
 
 use crate::modules::*;
 
-use crate::State;
-
 pub struct EventsModule;
 
 impl Module for EventsModule {
-	fn build(engine: &mut crate::Engine) -> Result<(), Box<dyn std::error::Error>> {
+	fn build(_engine: &mut crate::Engine) -> Result<(), Box<dyn std::error::Error>> {
 		Ok(())
 	}
 }

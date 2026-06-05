@@ -20,7 +20,7 @@ use shipyard::{
 	scheduler::{Label, WorkloadSystem},
 };
 
-use crate::{Engine, State};
+use crate::Engine;
 
 pub trait Module {
 	fn build(engine: &mut Engine) -> Result<(), Box<dyn Error>>;

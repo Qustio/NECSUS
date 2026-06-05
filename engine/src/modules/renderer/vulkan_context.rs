@@ -1,7 +1,6 @@
 use ash::*;
 use shipyard::*;
-use std::ffi::{CString, c_char};
-use std::ops::Deref;
+use std::ffi::CString;
 use std::sync::{Arc, Mutex};
 use std::{error::Error, ffi::CStr};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -115,7 +114,7 @@ impl Drop for Instance {
 pub struct DebugMsg {
 	messager: vk::DebugUtilsMessengerEXT,
 	dbg_instance: ext::debug_utils::Instance,
-	instance: Arc<Instance>,
+	_instance: Arc<Instance>,
 }
 
 impl DebugMsg {
@@ -137,7 +136,7 @@ impl DebugMsg {
 		Ok(Arc::new(Self {
 			messager,
 			dbg_instance,
-			instance,
+			_instance: instance,
 		}))
 	}
 
@@ -221,7 +220,7 @@ pub struct Device {
 	pub(super) physical_device: vk::PhysicalDevice,
 	pub(super) graphics_queue_index: u32,
 	pub graphics_queue: Mutex<vk::Queue>,
-	instance: Arc<Instance>,
+	_instance: Arc<Instance>,
 }
 
 impl Device {
@@ -267,11 +266,12 @@ impl Device {
 		};
 
 		let device = unsafe {
-			let mut extensions = Vec::<*const c_char>::new();
-			extensions.push(khr::swapchain::NAME.as_ptr());
-			extensions.push(khr::shader_non_semantic_info::NAME.as_ptr());
-			extensions.push(khr::buffer_device_address::NAME.as_ptr());
-			extensions.push(ext::host_query_reset::NAME.as_ptr());
+			let extensions = vec![
+				khr::swapchain::NAME.as_ptr(),
+				khr::shader_non_semantic_info::NAME.as_ptr(),
+				khr::buffer_device_address::NAME.as_ptr(),
+				ext::host_query_reset::NAME.as_ptr()
+			];
 
 			let mut extensions13 = vk::PhysicalDeviceVulkan13Features::default()
 				.dynamic_rendering(true)
@@ -297,7 +297,7 @@ impl Device {
 			physical_device,
 			graphics_queue_index: queue_family_index,
 			graphics_queue: Mutex::new(queue),
-			instance,
+			_instance: instance,
 		}))
 	}
 
@@ -329,7 +329,7 @@ impl Drop for Device {
 pub struct Allocator {
 	#[deref]
 	allocator: vk_mem::Allocator,
-	device: Arc<Device>,
+	_device: Arc<Device>,
 }
 
 impl Allocator {
@@ -344,6 +344,9 @@ impl Allocator {
 				device.physical_device,
 			))?
 		};
-		Ok(Arc::new(Self { allocator, device }))
+		Ok(Arc::new(Self {
+			allocator,
+			_device: device,
+		}))
 	}
 }

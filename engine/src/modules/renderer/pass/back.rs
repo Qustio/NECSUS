@@ -53,7 +53,11 @@ impl Back {
 		})
 	}
 
-	pub(in super::super) fn record(&self, frame_sync: &FrameSync, swapchain: &Swapchain) {
+	pub(in super::super) fn record(
+		&self,
+		frame_sync: &FrameSync,
+		swapchain: &Swapchain,
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let id = frame_sync.frame_id as usize;
 		let id_image = frame_sync.acquired_image_index as usize;
 		let cmd = &self.commands[id];
@@ -61,7 +65,7 @@ impl Back {
 		unsafe {
 			// reset all buffers in pool
 			cmd.device
-				.reset_command_pool(cmd.pool, vk::CommandPoolResetFlags::empty());
+				.reset_command_pool(cmd.pool, vk::CommandPoolResetFlags::empty())?;
 			cmd.device.begin_command_buffer(
 				cmd.buffer,
 				&vk::CommandBufferBeginInfo::default()
@@ -73,7 +77,7 @@ impl Back {
 								.rasterization_samples(vk::SampleCountFlags::TYPE_1),
 						),
 					),
-			);
+			)?;
 			cmd.device.cmd_begin_rendering(
 				cmd.buffer,
 				&vk::RenderingInfo::default()
@@ -119,10 +123,10 @@ impl Back {
 				vk::IndexType::UINT32,
 			);
 			cmd.device.cmd_draw_indexed(cmd.buffer, 6, 1, 0, 0, 0);
-			// cmd draw
 			cmd.device.cmd_end_rendering(cmd.buffer);
-			cmd.device.end_command_buffer(cmd.buffer);
+			cmd.device.end_command_buffer(cmd.buffer)?;
 		}
+		Ok(())
 	}
 }
 

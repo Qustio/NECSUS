@@ -1,12 +1,12 @@
 use std::{default::Default, error::Error, sync::Arc};
 
-use super::command_context::CommandContext;
-use super::vulkan_context::{Device, Instance, Surface};
+use super::vulkan_context::Device;
 use ash::{prelude::VkResult, *};
 use itertools::Itertools;
 use shipyard::Unique;
 
 #[derive(Unique)]
+#[allow(dead_code)]
 pub struct FrameSync {
 	pub(super) image_availabe: Vec<vk::Semaphore>,
 	pub(super) render_finished: Vec<vk::Semaphore>,

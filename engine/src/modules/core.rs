@@ -1,11 +1,10 @@
 use std::time::{Duration, Instant};
 
 use shipyard::{scheduler::IntoWorkloadSystem, *};
-use winit::{event::KeyEvent, keyboard::NamedKey, monitor::VideoModeHandle, window::Fullscreen};
 
 use crate::{
 	Engine, State,
-	modules::{Module, System, events::Event},
+	modules::{Module, System},
 };
 
 #[derive(Debug)]
@@ -17,12 +16,14 @@ impl Module for CoreModule {
 			Box::new(State::Startup),
 			startup.into_workload_system()?,
 		));
-		// why it crashes if uncomment?
-		//engine.systems.push(System::new(State::PreUpdate, update_fixed_time.into_workload_system()?));
 		engine.systems.push(System::new(
-			Box::new(State::Update),
+			Box::new(State::PreUpdate),
+			update_fixed_time.into_workload_system()?
+		).before("Time"));
+		engine.systems.push(System::new(
+			Box::new(State::PreUpdate),
 			update_time.into_workload_system()?,
-		));
+		).label("Time"));
 		Ok(())
 	}
 }
@@ -83,14 +84,13 @@ pub struct Time {
 }
 
 fn startup(world: AllStoragesViewMut) {
-	//world.add_unique(EventRegistry::default());
 	world.add_unique(Time {
 		delta: Duration::ZERO,
 		elapsed: Duration::ZERO,
 		last_frame: Instant::now(),
 	});
 	world.add_unique(FixedTime {
-		step: Duration::from_millis(1000),
+		step: Duration::from_millis(1000/16),
 		accumulator: Duration::ZERO,
 	});
 }
@@ -100,6 +100,8 @@ fn update_fixed_time(time: UniqueView<Time>, mut fixed: UniqueViewMut<FixedTime>
 }
 
 fn update_time(mut time: UniqueViewMut<Time>) {
-	time.elapsed = time.last_frame.elapsed();
+	let elapsed = time.last_frame.elapsed();
+	time.delta = elapsed;
+	time.elapsed += elapsed;
 	time.last_frame = Instant::now();
 }

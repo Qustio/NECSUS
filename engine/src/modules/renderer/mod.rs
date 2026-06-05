@@ -3,10 +3,8 @@ pub mod command_context;
 pub mod debug_tools;
 pub mod frame_sync;
 pub mod imgui;
-pub mod material;
 pub mod mesh;
 pub mod pass;
-pub mod pipeline;
 pub mod swapchain;
 pub mod vulkan_context;
 
@@ -166,7 +164,7 @@ fn render_record_main(
 		&mesh_handles,
 		&transforms,
 		&camera,
-	);
+	)?;
 	Ok(())
 }
 
@@ -178,7 +176,7 @@ fn render_record_back(
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
-	back_pass.record(&frame_sync, &swapchain);
+	back_pass.record(&frame_sync, &swapchain)?;
 	Ok(())
 }
 
@@ -191,7 +189,7 @@ fn render_record_imgui(
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
-	imgui_pass.record(&frame_sync, &swapchain, &mut draw_list);
+	imgui_pass.record(&frame_sync, &swapchain, &mut draw_list)?;
 	Ok(())
 }
 
@@ -200,7 +198,7 @@ fn render_submit(
 	cmd_ctx: UniqueView<command_context::CommandContext>,
 	swapchain: UniqueView<swapchain::Swapchain>,
 	main_pass: UniqueView<pass::main::Main>,
-	back_pass: UniqueView<pass::back::Back>,
+	_back_pass: UniqueView<pass::back::Back>,
 	imgui_pass: UniqueView<imgui::ImguiState>,
 	capture: UniqueView<debug_tools::FrameCapture>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {

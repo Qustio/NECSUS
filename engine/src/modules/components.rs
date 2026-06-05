@@ -1,5 +1,4 @@
-use bytemuck::{Pod, Zeroable};
-use nalgebra::{Matrix4, Point, Point3, Unit, UnitQuaternion};
+use nalgebra::{Matrix4, Point, Unit, UnitQuaternion};
 use nalgebra_glm::*;
 use shipyard::*;
 

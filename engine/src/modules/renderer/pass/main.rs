@@ -72,7 +72,7 @@ impl Main {
 		mesh_handles: &View<mesh::MeshHandle>,
 		transforms: &View<components::Transform>,
 		camera: &components::Camera,
-	) {
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let id = frame_sync.frame_id as usize;
 		let id_image = frame_sync.acquired_image_index as usize;
 		let cmd = &self.commands[id];
@@ -80,7 +80,7 @@ impl Main {
 		unsafe {
 			// reset all buffers in pool
 			cmd.device
-				.reset_command_pool(cmd.pool, vk::CommandPoolResetFlags::empty());
+				.reset_command_pool(cmd.pool, vk::CommandPoolResetFlags::empty())?;
 			cmd.device.begin_command_buffer(
 				cmd.buffer,
 				&vk::CommandBufferBeginInfo::default()
@@ -92,7 +92,7 @@ impl Main {
 								.rasterization_samples(vk::SampleCountFlags::TYPE_1),
 						),
 					),
-			);
+			)?;
 			cmd.device.cmd_begin_rendering(
 				cmd.buffer,
 				&vk::RenderingInfo::default()
@@ -130,7 +130,6 @@ impl Main {
 				self.pipeline.pipeline(),
 			);
 
-			// meshes
 			for (mesh, trans) in (mesh_handles, transforms).iter() {
 				let Some(mesh_data) = mesh_assets.mesh_assets.get(&mesh.0) else {
 					continue;
@@ -160,8 +159,9 @@ impl Main {
 			}
 
 			cmd.device.cmd_end_rendering(cmd.buffer);
-			cmd.device.end_command_buffer(cmd.buffer);
+			cmd.device.end_command_buffer(cmd.buffer)?;
 		}
+		Ok(())
 	}
 }
 

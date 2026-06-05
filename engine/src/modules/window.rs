@@ -36,33 +36,31 @@ fn read_event(
 ) -> Result<(), Box<dyn Error>> {
 	let _span = tracy_client::span!("read_event");
 	for event in events.events.iter() {
-		match &event {
-			winit::event::WindowEvent::KeyboardInput {
-				device_id,
-				event:
-					KeyEvent {
-						physical_key: winit::keyboard::PhysicalKey::Code(KeyCode::F11),
-						logical_key,
-						text,
-						location,
-						state: winit::event::ElementState::Pressed,
-						repeat: false,
-						..
-					},
-				is_synthetic,
-			} => {
-				tracing::info!(target: "input", "fullscreen");
-				let mon = window.window.current_monitor().unwrap();
-				let f = window.window.fullscreen();
-				if f.is_none() {
-					window
-						.window
-						.set_fullscreen(Some(Fullscreen::Borderless(Some(mon))));
-				} else {
-					window.window.set_fullscreen(None);
-				}
+		if let winit::event::WindowEvent::KeyboardInput {
+			device_id: _,
+			event:
+				KeyEvent {
+					physical_key: winit::keyboard::PhysicalKey::Code(KeyCode::F11),
+					logical_key: _,
+					text: _,
+					location: _,
+					state: winit::event::ElementState::Pressed,
+					repeat: false,
+					..
+				},
+			is_synthetic: _,
+		} = &event
+		{
+			tracing::info!(target: "input", "fullscreen");
+			let mon = window.window.current_monitor().unwrap();
+			let f = window.window.fullscreen();
+			if f.is_none() {
+				window
+					.window
+					.set_fullscreen(Some(Fullscreen::Borderless(Some(mon))));
+			} else {
+				window.window.set_fullscreen(None);
 			}
-			_ => (),
 		}
 	}
 	Ok(())

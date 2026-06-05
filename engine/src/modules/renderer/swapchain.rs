@@ -1,6 +1,5 @@
 use std::{default::Default, error::Error, sync::Arc};
 
-use super::command_context::CommandContext;
 use super::frame_sync::FrameSync;
 use super::vulkan_context::{Device, Instance, Surface};
 use ash::*;
@@ -190,7 +189,7 @@ impl Swapchain {
 			)?;
 			self.swapchain_loader.destroy_swapchain(old_swapchain, None);
 			self.swapchain = new_swapchain;
-			self.images = unsafe { self.swapchain_loader.get_swapchain_images(new_swapchain)? };
+			self.images = self.swapchain_loader.get_swapchain_images(new_swapchain)?;
 			self.image_views = self
 				.images
 				.iter()

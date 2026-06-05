@@ -100,14 +100,14 @@ impl ImguiState {
 		frame_sync: &FrameSync,
 		swapchain: &Swapchain,
 		draws: &mut UiDrawList,
-	) {
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let id = frame_sync.frame_id as usize;
 		let id_image = frame_sync.acquired_image_index as usize;
 		let cmd = &self.commands[id];
 		let image_view = swapchain.image_views[id_image];
 		unsafe {
 			cmd.device
-				.reset_command_pool(cmd.pool, vk::CommandPoolResetFlags::empty());
+				.reset_command_pool(cmd.pool, vk::CommandPoolResetFlags::empty())?;
 			cmd.device
 				.begin_command_buffer(
 					cmd.buffer,
@@ -120,8 +120,7 @@ impl ImguiState {
 									.rasterization_samples(vk::SampleCountFlags::TYPE_1),
 							),
 						),
-				)
-				.unwrap();
+				)?;
 			cmd.device.cmd_begin_rendering(
 				cmd.buffer,
 				&vk::RenderingInfo::default()
@@ -146,8 +145,9 @@ impl ImguiState {
 			.unwrap();
 		unsafe {
 			cmd.device.cmd_end_rendering(cmd.buffer);
-			cmd.device.end_command_buffer(cmd.buffer).unwrap();
+			cmd.device.end_command_buffer(cmd.buffer)?;
 		}
+		Ok(())
 	}
 }
 

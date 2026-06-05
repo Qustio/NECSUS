@@ -1,6 +1,5 @@
-use std::{env, error::Error};
+use std::error::Error;
 
-use color_eyre::owo_colors::OwoColorize;
 use engine::modules::components::Transform;
 use engine::modules::renderer::mesh::{MeshAssetManager, MeshHandle, Vertex};
 use engine::modules::{
@@ -11,9 +10,9 @@ use engine::nalgebra_glm::Vec3;
 use engine::shipyard::{EntitiesViewMut, ViewMut};
 use engine::*;
 use shipyard::{UniqueViewMut, scheduler::IntoWorkloadSystem};
-use tracing::{self, level_filters::LevelFilter};
+use tracing::{self};
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::{fmt, prelude::*};
+use tracing_subscriber::fmt;
 
 struct GameModule;
 impl Module for GameModule {
@@ -47,13 +46,14 @@ fn spawn_objects(
 	mut mesh_handles: ViewMut<MeshHandle>,
 	mut transform: ViewMut<Transform>,
 ) {
-	let mut d = Transform::default();
-	d.local = nalgebra_glm::translation(&Vec3::new(5.0, 0.0, 0.0));
 	mesh_assets.load_gltf::<Vertex>("suzanne.glb").unwrap();
 	mesh_assets.load_gltf::<Vertex>("cube.glb").unwrap();
 	entities.add_entity(
 		(&mut mesh_handles, &mut transform),
-		(MeshHandle("Cube.0".to_string()), d),
+		(MeshHandle("Cube.0".to_string()), Transform{
+			local: nalgebra_glm::translation(&Vec3::new(5.0, 0.0, 0.0)),
+			..Default::default()
+		}),
 	);
 	entities.add_entity(
 		(&mut mesh_handles, &mut transform),

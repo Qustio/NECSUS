@@ -3,7 +3,7 @@ use std::{
 	sync::{Arc, atomic::AtomicBool},
 };
 
-use ash::{vk::Extent2D, *};
+use ash::*;
 use shipyard::Unique;
 use vk_mem::Alloc;
 
@@ -18,7 +18,7 @@ pub struct FrameCapture {
 	pub(super) buffer: Buffer<u8>,
 	pub(super) extent: vk::Extent2D,
 	pub(super) image: (vk::Image, vk_mem::Allocation),
-	device: Arc<Device>,
+	_device: Arc<Device>,
 	allocator: Arc<Allocator>,
 }
 
@@ -69,7 +69,7 @@ impl FrameCapture {
 			buffer,
 			extent,
 			image,
-			device,
+			_device: device,
 			allocator,
 		})
 	}
@@ -98,5 +98,3 @@ impl Drop for FrameCapture {
 		}
 	}
 }
-
-//tracy_client::frame_image(image, width, height, offset, flip);

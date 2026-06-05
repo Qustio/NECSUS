@@ -3,7 +3,6 @@ use std::{error::Error, sync::Arc};
 
 use ash::*;
 use hashbrown::HashMap;
-use nalgebra::allocator;
 use shipyard::{Component, Unique};
 
 use super::buffer::Buffer;
