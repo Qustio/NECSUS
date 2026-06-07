@@ -12,6 +12,7 @@ use engine::*;
 use shipyard::{UniqueViewMut, scheduler::IntoWorkloadSystem};
 use tracing::{self};
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::Layer;
 use tracing_subscriber::fmt;
 
 struct GameModule;
@@ -61,7 +62,7 @@ fn spawn_objects(
 	);
 }
 
-#[cfg(any(feature = "memory_profiling", debug_assertions))]
+#[cfg(any(feature = "tracy"))]
 #[global_allocator]
 static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
 	tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
@@ -69,7 +70,7 @@ static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
 fn main() -> Result<(), Box<dyn Error>> {
 	let subscriber = tracing_subscriber::registry();
 
-	#[cfg(debug_assertions)]
+	#[cfg(feature = "tracy")]
 	let subscriber = subscriber.with(tracing_tracy::TracyLayer::default());
 
 	let fmt_layer = fmt::Layer::default()

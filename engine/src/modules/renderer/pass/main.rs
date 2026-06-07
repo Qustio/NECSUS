@@ -8,6 +8,7 @@ use super::Pass;
 use super::command_context::FrameCommand;
 use super::components;
 use super::frame_sync::FrameSync;
+use super::gbuffers::GBuffers;
 use super::mesh;
 use super::mesh::Vertex;
 use super::mesh::VertexDescription;
@@ -36,7 +37,7 @@ impl DrawConstants {
 		transform: &components::Transform,
 	) -> Self {
 		let aspect = extent.width as f32 / extent.height as f32;
-		let mut proj = nalgebra_glm::perspective_rh_zo(aspect, 90_f32.to_radians(), 0.1, 100.0);
+		let mut proj = nalgebra_glm::perspective_rh_zo(aspect, 90_f32.to_radians(), 1000.0, 0.001);
 		let rev_z_matrix = Mat4::new(
 			1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0,
 		);
@@ -68,6 +69,7 @@ impl Main {
 		&self,
 		frame_sync: &FrameSync,
 		swapchain: &Swapchain,
+		gbuffers: &GBuffers,
 		mesh_assets: &mesh::MeshAssetManager,
 		mesh_handles: &View<mesh::MeshHandle>,
 		transforms: &View<components::Transform>,
@@ -77,6 +79,7 @@ impl Main {
 		let id_image = frame_sync.acquired_image_index as usize;
 		let cmd = &self.commands[id];
 		let image_view = swapchain.image_views[id_image];
+		let depth_view = gbuffers[id_image].depth.view;
 		unsafe {
 			// reset all buffers in pool
 			cmd.device
@@ -102,7 +105,13 @@ impl Main {
 						.image_view(image_view)
 						.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
 						.load_op(vk::AttachmentLoadOp::LOAD)
-						.store_op(vk::AttachmentStoreOp::STORE)]),
+						.store_op(vk::AttachmentStoreOp::STORE)])
+					.depth_attachment(&vk::RenderingAttachmentInfo::default()
+						.image_view(depth_view)
+						.image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+						.load_op(vk::AttachmentLoadOp::LOAD)
+						.store_op(vk::AttachmentStoreOp::STORE)
+					),
 			);
 			cmd.device.cmd_set_viewport(
 				cmd.buffer,
@@ -256,6 +265,11 @@ impl Pipeline {
 			let color_blend =
 				vk::PipelineColorBlendStateCreateInfo::default().attachments(&attachments);
 
+			let depth_state = vk::PipelineDepthStencilStateCreateInfo::default()
+				.depth_test_enable(true)
+				.depth_write_enable(true)
+				.depth_compare_op(vk::CompareOp::GREATER_OR_EQUAL);
+
 			let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
 			let dynamic_state =
 				vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
@@ -263,7 +277,8 @@ impl Pipeline {
 			let attachment_formats = [image_format];
 
 			let mut rendering_info = vk::PipelineRenderingCreateInfo::default()
-				.color_attachment_formats(&attachment_formats);
+				.color_attachment_formats(&attachment_formats)
+				.depth_attachment_format(vk::Format::D32_SFLOAT);
 
 			let info = vk::GraphicsPipelineCreateInfo::default()
 				.stages(&stages)
@@ -273,6 +288,7 @@ impl Pipeline {
 				.rasterization_state(&rasterization)
 				.multisample_state(&multisample)
 				.color_blend_state(&color_blend)
+				.depth_stencil_state(&depth_state)
 				.dynamic_state(&dynamic_state)
 				.layout(layout)
 				.push_next(&mut rendering_info);

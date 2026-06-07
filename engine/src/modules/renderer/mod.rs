@@ -1,7 +1,9 @@
+pub mod allocated_image;
 pub mod buffer;
 pub mod command_context;
 pub mod debug_tools;
 pub mod frame_sync;
+pub mod gbuffers;
 pub mod imgui;
 pub mod mesh;
 pub mod pass;
@@ -109,6 +111,7 @@ fn imgui_handle_events(
 fn render_start(
 	mut frame_sync: UniqueViewMut<frame_sync::FrameSync>,
 	swapchain: UniqueView<swapchain::Swapchain>,
+	gbuffers: UniqueView<gbuffers::GBuffers>,
 	cmd_ctx: UniqueView<command_context::CommandContext>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!("render_start");
@@ -118,10 +121,10 @@ fn render_start(
 	swapchain.acqure(&mut frame_sync).expect("OUT OF DATE");
 
 	cmd_ctx.begin(frame_sync.frame_id)?;
-	cmd_ctx.swapchain_to_optimal(&frame_sync, &swapchain)?;
+	cmd_ctx.to_optimal(&frame_sync, &swapchain, &gbuffers)?;
 
 	// clearing image - can be one call
-	cmd_ctx.begin_rendering(&frame_sync, &swapchain)?;
+	cmd_ctx.begin_rendering(&frame_sync, &swapchain, &gbuffers)?;
 	cmd_ctx.end_rendering(&frame_sync)?;
 	Ok(())
 }
@@ -149,6 +152,7 @@ fn render_record_main(
 	frame_sync: UniqueView<frame_sync::FrameSync>,
 	main_pass: UniqueView<pass::main::Main>,
 	swapchain: UniqueView<swapchain::Swapchain>,
+	gbuffers: UniqueView<gbuffers::GBuffers>,
 	mesh_assets: UniqueView<mesh::MeshAssetManager>,
 	mesh_handles: View<mesh::MeshHandle>,
 	transforms: View<components::Transform>,
@@ -160,6 +164,7 @@ fn render_record_main(
 	main_pass.record(
 		&frame_sync,
 		&swapchain,
+		&gbuffers,
 		&mesh_assets,
 		&mesh_handles,
 		&transforms,
@@ -218,12 +223,14 @@ fn render_submit(
 fn render_wait(
 	vulkan_context: UniqueViewMut<vulkan_context::VulkanContext>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+	let _span = tracy_client::span!();
 	vulkan_context.device.wait()?;
 	Ok(())
 }
 
 fn recreate_swapchain(
 	mut swapchain: UniqueViewMut<swapchain::Swapchain>,
+	mut gbuffers: UniqueViewMut<gbuffers::GBuffers>,
 	events: UniqueView<modules::core::EventQueue<WindowEvent>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
@@ -233,7 +240,11 @@ fn recreate_swapchain(
 		_ => None,
 	});
 	if let Some(new_size) = new_size {
-		swapchain.recreate(new_size)?
+		swapchain.recreate(new_size)?;
+		gbuffers.resize(ash::vk::Extent2D::default()
+			.width(new_size.width)
+			.height(new_size.height)
+		)?;
 	}
 
 	Ok(())
@@ -255,6 +266,7 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 		context.device.clone(),
 		context.surface.clone(),
 		size,
+		None
 	)?;
 
 	// Frame sync data
@@ -275,6 +287,12 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 		context.allocator.clone(),
 		swapchain.frame_count,
 		swapchain.format.format,
+	)?;
+	let gbuffers = gbuffers::GBuffers::new(
+		swapchain.extent,
+		context.allocator.clone(),
+		context.device.clone(),
+		swapchain.frame_count,
 	)?;
 	let imgui_pass = imgui::ImguiState::new(
 		context.instance.clone(),
@@ -301,6 +319,7 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 	world.add_unique(command_context);
 	world.add_unique(main_pass);
 	world.add_unique(back_pass);
+	world.add_unique(gbuffers);
 	world.add_unique(imgui_pass);
 	world.add_unique(draw_list);
 	world.add_unique(frame_capture);

@@ -156,23 +156,33 @@ impl ApplicationHandler for Engine {
 			if state.dyn_eq(&State::Startup) {
 				continue;
 			}
+			if state.dyn_eq(&State::Cleanup) {
+				continue;
+			}
 			self.world.run_workload(state.dyn_clone()).unwrap();
 		}
-		// Clear events
-		let clear_fns = {
-			let registry = self.world.get_unique::<&EventRegistry>().unwrap();
-			registry.clear_fns().to_vec()
-		};
 
-		for clear in clear_fns {
-			clear(&mut self.world);
+		// Clear events
+		{
+			let _span = tracy_client::span!("Clear events");
+			let clear_fns = {
+				let registry = self.world.get_unique::<&EventRegistry>().unwrap();
+				registry.clear_fns().to_vec()
+			};
+
+			for clear in clear_fns {
+				clear(&mut self.world);
+			}
 		}
 
 		// Request redraw
-		self.world
-			.get_unique::<&modules::window::Window>()
-			.unwrap()
-			.request_redraw();
+		{
+			let _span = tracy_client::span!("Request redraw");
+			self.world
+				.get_unique::<&modules::window::Window>()
+				.unwrap()
+				.request_redraw();
+		}
 	}
 
 	fn suspended(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {

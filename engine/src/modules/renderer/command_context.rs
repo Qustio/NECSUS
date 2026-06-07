@@ -1,6 +1,7 @@
+use super::gbuffers::GBuffers;
+use super::vulkan_context::Device;
 use super::{debug_tools::FrameCapture, frame_sync::FrameSync, pass::Pass, swapchain::Swapchain};
 
-use super::vulkan_context::Device;
 use ash::*;
 use shipyard::Unique;
 use std::sync::atomic::Ordering;
@@ -85,23 +86,18 @@ impl CommandContext {
 		Ok(())
 	}
 
-	pub(super) fn swapchain_to_optimal(
+	pub(super) fn to_optimal(
 		&self,
 		frame_sync: &FrameSync,
 		swapchain: &Swapchain,
+		gbuffers: &GBuffers,
 	) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let _span = tracy_client::span!();
 		let id = frame_sync.frame_id as usize;
 		let id_image = frame_sync.acquired_image_index as usize;
 		let cmd = &self.commands[id];
 		let image = swapchain.images[id_image];
-
-		let color_range = vk::ImageSubresourceRange {
-			aspect_mask: vk::ImageAspectFlags::COLOR,
-			level_count: 1,
-			layer_count: 1,
-			..Default::default()
-		};
+		let depth = gbuffers[id_image].depth.image;
 
 		unsafe {
 			cmd.device.cmd_pipeline_barrier2(
@@ -115,7 +111,31 @@ impl CommandContext {
 						.old_layout(vk::ImageLayout::UNDEFINED)
 						.new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
 						.image(image)
-						.subresource_range(color_range),
+						.subresource_range(vk::ImageSubresourceRange {
+							aspect_mask: vk::ImageAspectFlags::COLOR,
+							level_count: 1,
+							layer_count: 1,
+							..Default::default()
+						}),
+				]),
+			);
+			cmd.device.cmd_pipeline_barrier2(
+				cmd.buffer,
+				&vk::DependencyInfo::default().image_memory_barriers(&[
+					vk::ImageMemoryBarrier2::default()
+						.src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
+						.dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+						.src_access_mask(vk::AccessFlags2::NONE)
+						.dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+						.old_layout(vk::ImageLayout::UNDEFINED)
+						.new_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+						.image(depth)
+						.subresource_range(vk::ImageSubresourceRange {
+							aspect_mask: vk::ImageAspectFlags::DEPTH,
+							level_count: 1,
+							layer_count: 1,
+							..Default::default()
+						}),
 				]),
 			);
 		}
@@ -292,26 +312,41 @@ impl CommandContext {
 		&self,
 		frame_sync: &FrameSync,
 		swapchain: &Swapchain,
+		gbuffers: &GBuffers,
 	) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let _span = tracy_client::span!();
 		let id = frame_sync.frame_id as usize;
 		let id_image = frame_sync.acquired_image_index as usize;
 		let cmd = &self.commands[id];
 		let image_view = swapchain.image_views[id_image];
+		let depth_view = gbuffers[id_image].depth.view;
 		unsafe {
 			cmd.device.cmd_begin_rendering(
 				cmd.buffer,
 				&vk::RenderingInfo::default()
 					.render_area(vk::Rect2D::default().extent(swapchain.extent))
 					.layer_count(1)
-					.color_attachments(&[vk::RenderingAttachmentInfo::default()
-						.image_view(image_view)
-						.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+					.color_attachments(&[
+						vk::RenderingAttachmentInfo::default()
+							.image_view(image_view)
+							.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+							.load_op(vk::AttachmentLoadOp::CLEAR)
+							.store_op(vk::AttachmentStoreOp::STORE)
+							.clear_value(vk::ClearValue {
+								color: vk::ClearColorValue { float32: [0.0; 4] },
+							}),
+					])
+					.depth_attachment(&vk::RenderingAttachmentInfo::default()
+						.image_view(depth_view)
+						.image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
 						.load_op(vk::AttachmentLoadOp::CLEAR)
 						.store_op(vk::AttachmentStoreOp::STORE)
 						.clear_value(vk::ClearValue {
-							color: vk::ClearColorValue { float32: [0.0; 4] },
-						})]),
+							depth_stencil: vk::ClearDepthStencilValue {
+								depth: 0.0,
+								stencil: 0,
+							},
+					}))
 			);
 		}
 		Ok(())
@@ -372,13 +407,13 @@ impl CommandContext {
 				*queue,
 				&[vk::SubmitInfo2::default()
 					.wait_semaphore_infos(&[vk::SemaphoreSubmitInfo::default()
-						.semaphore(frame_sync.image_availabe[frame])
+						.semaphore(frame_sync.image_availabe[frame_sync.acquired_image_index as usize])
 						.stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)])
 					.command_buffer_infos(&[
 						vk::CommandBufferSubmitInfo::default().command_buffer(cmd.buffer)
 					])
 					.signal_semaphore_infos(&[vk::SemaphoreSubmitInfo::default()
-						.semaphore(frame_sync.render_finished[frame])
+						.semaphore(frame_sync.render_finished[frame_sync.acquired_image_index as usize])
 						.stage_mask(vk::PipelineStageFlags2::ALL_GRAPHICS)])],
 				frame_sync.fences[frame],
 			)?;

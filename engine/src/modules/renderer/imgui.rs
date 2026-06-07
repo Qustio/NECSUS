@@ -69,7 +69,10 @@ impl ImguiState {
 				depth_attachment_format: None,
 			},
 			&mut context,
-			None,
+			Some(imgui_rs_vulkan_renderer::Options{
+				in_flight_frames: frame_count as usize,
+				..Default::default()
+			}),
 		)?;
 
 		Ok(Self {

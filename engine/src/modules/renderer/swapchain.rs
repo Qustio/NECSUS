@@ -18,6 +18,7 @@ pub struct Swapchain {
 	pub frame_count: u32,
 	surface: Arc<Surface>,
 	device: Arc<Device>,
+	instance: Arc<Instance>
 }
 
 impl Swapchain {
@@ -26,6 +27,7 @@ impl Swapchain {
 		device: Arc<Device>,
 		surface: Arc<Surface>,
 		size: PhysicalSize<u32>,
+		old_swapchain: Option<vk::SwapchainKHR>
 	) -> Result<Self, Box<dyn Error + Send + Sync>> {
 		let swapchain_loader = khr::swapchain::Device::new(&instance, &device);
 
@@ -59,9 +61,9 @@ impl Swapchain {
 		let present_mode = present_modes
 			.into_iter()
 			.min_by_key(|&pm| match pm {
-				vk::PresentModeKHR::FIFO_RELAXED => 0,
+				vk::PresentModeKHR::FIFO_RELAXED => 2,
 				vk::PresentModeKHR::FIFO => 1,
-				vk::PresentModeKHR::MAILBOX => 2,
+				vk::PresentModeKHR::MAILBOX => 0,
 				_ => 3,
 			})
 			.ok_or("no suitable present mode found")?;
@@ -72,6 +74,7 @@ impl Swapchain {
 			height: size.height,
 		};
 
+		let old_swapchain = old_swapchain.unwrap_or(vk::SwapchainKHR::null());
 		let swapchain = unsafe {
 			swapchain_loader.create_swapchain(
 				&vk::SwapchainCreateInfoKHR::default()
@@ -88,6 +91,7 @@ impl Swapchain {
 					.pre_transform(capabilities.current_transform)
 					.composite_alpha(vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED)
 					.present_mode(present_mode)
+					.old_swapchain(old_swapchain)
 					.clipped(true),
 				None,
 			)?
@@ -129,6 +133,7 @@ impl Swapchain {
 			frame_count,
 			surface,
 			device,
+			instance,
 		})
 	}
 
@@ -137,15 +142,24 @@ impl Swapchain {
 		frame_sync: &mut FrameSync,
 	) -> Result<bool, Box<dyn Error + Send + Sync>> {
 		let _zone = tracy_client::span!();
+		let sem_idx = frame_sync.acquire_sem_idx as usize;
 		let (id, subopt) = unsafe {
 			self.swapchain_loader.acquire_next_image(
 				self.swapchain,
 				u64::MAX,
-				frame_sync.image_availabe[frame_sync.frame_id as usize],
+				frame_sync.acquire_semaphores[sem_idx],
 				vk::Fence::null(),
 			)?
 		};
+		// bind semaphore to acquired image slot; old slot semaphore returns to pool
+		std::mem::swap(
+			&mut frame_sync.image_availabe[id as usize],
+			&mut frame_sync.acquire_semaphores[sem_idx],
+		);
+		frame_sync.acquire_sem_idx = (frame_sync.acquire_sem_idx + 1) % self.frame_count;
 		frame_sync.acquired_image_index = id;
+		tracy_client::plot!("frame_id", frame_sync.frame_id as f64);
+		tracy_client::plot!("acquired_image_index", frame_sync.acquired_image_index as f64);
 		Ok(subopt)
 	}
 
@@ -155,66 +169,13 @@ impl Swapchain {
 	) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let _zone = tracy_client::span!();
 		self.device.wait()?;
-		let extent = vk::Extent2D {
-			width: size.width,
-			height: size.height,
-		};
-		let old_swapchain = self.swapchain;
-		unsafe {
-			for &view in &self.image_views {
-				self.device.destroy_image_view(view, None);
-			}
-			let capabilities = self.surface.get_physical_device_surface_capabilities(
-				self.device.physical_device,
-				self.surface.surface,
-			)?;
-			let new_swapchain = self.swapchain_loader.create_swapchain(
-				&vk::SwapchainCreateInfoKHR::default()
-					.surface(self.surface.surface)
-					.min_image_count(self.frame_count)
-					.image_format(self.format.format)
-					.image_color_space(self.format.color_space)
-					.image_extent(extent)
-					.image_array_layers(1)
-					.image_usage(
-						vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
-					)
-					.image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-					.pre_transform(capabilities.current_transform)
-					.composite_alpha(vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED)
-					.present_mode(self.present_mode)
-					.clipped(true)
-					.old_swapchain(old_swapchain), // ← key difference from new()
-				None,
-			)?;
-			self.swapchain_loader.destroy_swapchain(old_swapchain, None);
-			self.swapchain = new_swapchain;
-			self.images = self.swapchain_loader.get_swapchain_images(new_swapchain)?;
-			self.image_views = self
-				.images
-				.iter()
-				.map(|&image| {
-					self.device.create_image_view(
-						&vk::ImageViewCreateInfo {
-							image,
-							view_type: vk::ImageViewType::TYPE_2D,
-							format: self.format.format,
-							subresource_range: vk::ImageSubresourceRange {
-								aspect_mask: vk::ImageAspectFlags::COLOR,
-								level_count: 1,
-								layer_count: 1,
-								..Default::default()
-							},
-							..Default::default()
-						},
-						None,
-					)
-				})
-				.collect::<Result<Vec<_>, _>>()?;
-			self.extent = extent;
-			self.frame_count = self.images.len() as u32;
-		}
-
+		*self = Self::new(
+			self.instance.clone(),
+			self.device.clone(),
+			self.surface.clone(),
+			size,
+			Some(self.swapchain)
+		)?;
 		Ok(())
 	}
 
@@ -223,7 +184,7 @@ impl Swapchain {
 		frame_sync: &mut FrameSync,
 	) -> Result<bool, Box<dyn Error + Send + Sync>> {
 		let _zone = tracy_client::span!();
-		let frame = frame_sync.frame_id as usize;
+		let img = frame_sync.acquired_image_index as usize;
 		let queue = self
 			.device
 			.graphics_queue
@@ -233,7 +194,7 @@ impl Swapchain {
 			self.swapchain_loader.queue_present(
 				*queue,
 				&vk::PresentInfoKHR::default()
-					.wait_semaphores(&[frame_sync.render_finished[frame]])
+					.wait_semaphores(&[frame_sync.render_finished[img]])
 					.image_indices(&[frame_sync.acquired_image_index])
 					.swapchains(&[self.swapchain]),
 			)?

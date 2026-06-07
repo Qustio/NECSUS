@@ -8,6 +8,8 @@ use shipyard::Unique;
 #[derive(Unique)]
 #[allow(dead_code)]
 pub struct FrameSync {
+	pub(super) acquire_semaphores: Vec<vk::Semaphore>,
+	pub(super) acquire_sem_idx: u32,
 	pub(super) image_availabe: Vec<vk::Semaphore>,
 	pub(super) render_finished: Vec<vk::Semaphore>,
 	pub(super) fences: Vec<vk::Fence>,
@@ -36,7 +38,14 @@ impl FrameSync {
 			.collect::<VkResult<Vec<_>>>()?
 			.into_iter()
 			.multiunzip();
+		let acquire_semaphores = (0..frame_count)
+			.map(|_| unsafe {
+				device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+			})
+			.collect::<VkResult<Vec<_>>>()?;
 		Ok(Self {
+			acquire_semaphores,
+			acquire_sem_idx: 0,
 			image_availabe,
 			render_finished,
 			fences,
@@ -63,6 +72,9 @@ impl Drop for FrameSync {
 	fn drop(&mut self) {
 		unsafe {
 			let _ = self.device.device_wait_idle();
+			for &s in &self.acquire_semaphores {
+				self.device.destroy_semaphore(s, None);
+			}
 			for &s in &self.image_availabe {
 				self.device.destroy_semaphore(s, None);
 			}
