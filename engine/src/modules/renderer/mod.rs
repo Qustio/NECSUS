@@ -240,11 +240,8 @@ fn recreate_swapchain(
 		_ => None,
 	});
 	if let Some(new_size) = new_size {
-		swapchain.recreate(new_size)?;
-		gbuffers.resize(ash::vk::Extent2D::default()
-			.width(new_size.width)
-			.height(new_size.height)
-		)?;
+		let new_extent = swapchain.recreate(new_size)?;
+		gbuffers.resize(new_extent)?;
 	}
 
 	Ok(())

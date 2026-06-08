@@ -69,10 +69,11 @@ impl Swapchain {
 			.ok_or("no suitable present mode found")?;
 		tracing::debug!("selected present_mode: {:?}", present_mode);
 
-		let extent = vk::Extent2D {
-			width: size.width,
-			height: size.height,
-		};
+		tracing::info!("current: {:?}", capabilities.current_extent);
+		tracing::info!("max: {:?}", capabilities.max_image_extent);
+		tracing::info!("min: {:?}", capabilities.min_image_extent);
+		let extent = capabilities.current_extent;
+		tracing::info!("extent: {:?}", extent);
 
 		let old_swapchain = old_swapchain.unwrap_or(vk::SwapchainKHR::null());
 		let swapchain = unsafe {
@@ -89,7 +90,7 @@ impl Swapchain {
 					)
 					.image_sharing_mode(vk::SharingMode::EXCLUSIVE)
 					.pre_transform(capabilities.current_transform)
-					.composite_alpha(vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED)
+					.composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
 					.present_mode(present_mode)
 					.old_swapchain(old_swapchain)
 					.clipped(true),
@@ -166,7 +167,7 @@ impl Swapchain {
 	pub(super) fn recreate(
 		&mut self,
 		size: PhysicalSize<u32>,
-	) -> Result<(), Box<dyn Error + Send + Sync>> {
+	) -> Result<vk::Extent2D, Box<dyn Error + Send + Sync>> {
 		let _zone = tracy_client::span!();
 		self.device.wait()?;
 		*self = Self::new(
@@ -176,7 +177,7 @@ impl Swapchain {
 			size,
 			Some(self.swapchain)
 		)?;
-		Ok(())
+		Ok(self.extent)
 	}
 
 	pub(super) fn present(

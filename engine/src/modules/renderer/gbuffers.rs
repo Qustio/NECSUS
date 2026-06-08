@@ -34,6 +34,7 @@ impl GBuffers {
 		&mut self,
 		extent: vk::Extent2D,
 	) -> Result<(), Box<dyn Error + Send + Sync>> {
+		tracing::info!("resize gbuffers with {:?}", extent);
 		for gbuffer in &mut self.gbuffers {
 			gbuffer.resize(extent)?;
 		}
