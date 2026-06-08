@@ -11,6 +11,7 @@ use super::allocated_image::AllocatedImage;
 pub(super) struct GBuffers {
 	#[deref]
 	gbuffers: Vec<GBuffer>,
+	pub depth_format: vk::Format,
 }
 
 pub(super) struct GBuffer {
@@ -24,10 +25,14 @@ impl GBuffers {
 		device: Arc<Device>,
 		frame_count: u32,
 	) -> Result<Self, Box<dyn Error + Send + Sync>> {
+		let depth_format = vk::Format::D32_SFLOAT;
 		let gbuffers = (0..frame_count)
-			.map(|_| GBuffer::new(extent, allocator.clone(), device.clone()))
+			.map(|_| GBuffer::new(depth_format, extent, allocator.clone(), device.clone()))
 			.collect::<Result<Vec<_>, _>>()?;
-		Ok(Self { gbuffers })
+		Ok(Self {
+			gbuffers,
+    		depth_format,
+		})
 	}
 
 	pub(super) fn resize(
@@ -44,12 +49,13 @@ impl GBuffers {
 
 impl GBuffer {
 	fn new(
+		depth_format: vk::Format,
 		extent: vk::Extent2D,
 		allocator: Arc<Allocator>,
 		device: Arc<Device>,
 	) -> Result<Self, Box<dyn Error + Send + Sync>> {
 		let depth = AllocatedImage::new(
-			vk::Format::D32_SFLOAT,
+			depth_format,
 			extent,
 			vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
 			vk::ImageAspectFlags::DEPTH,

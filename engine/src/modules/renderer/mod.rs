@@ -9,11 +9,12 @@ pub mod mesh;
 pub mod pass;
 pub mod swapchain;
 pub mod vulkan_context;
+pub mod material;
 
 use crate::{
 	State,
 	modules::{
-		self, Module, System, components, core::AppData, renderer::imgui::UiDrawList,
+		self, Module, System, components, core::AppData, renderer::{imgui::UiDrawList, material::standart::StandartMaterial},
 		window::Window,
 	},
 };
@@ -155,6 +156,8 @@ fn render_record_main(
 	gbuffers: UniqueView<gbuffers::GBuffers>,
 	mesh_assets: UniqueView<mesh::MeshAssetManager>,
 	mesh_handles: View<mesh::MeshHandle>,
+	material_manager: UniqueView<material::MaterialManager>,
+	material_handles: View<material::MaterialHandle>,
 	transforms: View<components::Transform>,
 	camera: UniqueView<components::Camera>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -167,6 +170,8 @@ fn render_record_main(
 		&gbuffers,
 		&mesh_assets,
 		&mesh_handles,
+		&material_manager,
+		&material_handles,
 		&transforms,
 		&camera,
 	)?;
@@ -175,13 +180,13 @@ fn render_record_main(
 
 fn render_record_back(
 	frame_sync: UniqueView<frame_sync::FrameSync>,
-	back_pass: UniqueView<pass::back::Back>,
+	//back_pass: UniqueView<pass::back::Back>,
 	swapchain: UniqueView<swapchain::Swapchain>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
-	back_pass.record(&frame_sync, &swapchain)?;
+	//back_pass.record(&frame_sync, &swapchain)?;
 	Ok(())
 }
 
@@ -203,14 +208,14 @@ fn render_submit(
 	cmd_ctx: UniqueView<command_context::CommandContext>,
 	swapchain: UniqueView<swapchain::Swapchain>,
 	main_pass: UniqueView<pass::main::Main>,
-	back_pass: UniqueView<pass::back::Back>,
+	//back_pass: UniqueView<pass::back::Back>,
 	imgui_pass: UniqueView<imgui::ImguiState>,
 	capture: UniqueView<debug_tools::FrameCapture>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0x5566AA);
 
-	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &back_pass, &imgui_pass]);
+	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &imgui_pass]);
 	cmd_ctx.swapchain_to_present(&frame_sync, &swapchain, &capture)?;
 	cmd_ctx.end(&frame_sync)?;
 	cmd_ctx.submit(&frame_sync, &capture)?;
@@ -277,14 +282,13 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 	let main_pass = pass::main::Main::new(
 		context.device.clone(),
 		swapchain.frame_count,
-		swapchain.format.format,
 	)?;
-	let back_pass = pass::back::Back::new(
-		context.device.clone(),
-		context.allocator.clone(),
-		swapchain.frame_count,
-		swapchain.format.format,
-	)?;
+	// let back_pass = pass::back::Back::new(
+	// 	context.device.clone(),
+	// 	context.allocator.clone(),
+	// 	swapchain.frame_count,
+	// 	swapchain.format.format,
+	// )?;
 	let gbuffers = gbuffers::GBuffers::new(
 		swapchain.extent,
 		context.allocator.clone(),
@@ -307,6 +311,13 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 	)?;
 
 	let mesh_assets = mesh::MeshAssetManager::new(context.allocator.clone())?;
+	let mut material_manager = material::MaterialManager::new()?;
+	let mat = StandartMaterial::new(
+		context.device.clone(),
+		&swapchain,
+		&gbuffers
+	)?;
+	material_manager.register("standart", Box::new(mat))?;
 
 	let camera = components::Camera::default();
 
@@ -315,12 +326,13 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 	world.add_unique(frame_sync);
 	world.add_unique(command_context);
 	world.add_unique(main_pass);
-	world.add_unique(back_pass);
+	//world.add_unique(back_pass);
 	world.add_unique(gbuffers);
 	world.add_unique(imgui_pass);
 	world.add_unique(draw_list);
 	world.add_unique(frame_capture);
 	world.add_unique(mesh_assets);
+	world.add_unique(material_manager);
 	world.add_unique(camera);
 
 	Ok(())

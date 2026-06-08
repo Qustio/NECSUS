@@ -1,6 +1,7 @@
 use std::error::Error;
 
 use engine::modules::components::Transform;
+use engine::modules::renderer::material::{MaterialHandle, MaterialManager};
 use engine::modules::renderer::mesh::{MeshAssetManager, MeshHandle, Vertex};
 use engine::modules::{
 	Module, System,
@@ -44,21 +45,30 @@ fn draw_ui(mut draw_list: UniqueViewMut<UiDrawList>) {
 fn spawn_objects(
 	mut entities: EntitiesViewMut,
 	mut mesh_assets: UniqueViewMut<MeshAssetManager>,
+	mut material_handle: ViewMut<MaterialHandle>,
 	mut mesh_handles: ViewMut<MeshHandle>,
 	mut transform: ViewMut<Transform>,
 ) {
 	mesh_assets.load_gltf::<Vertex>("suzanne.glb").unwrap();
 	mesh_assets.load_gltf::<Vertex>("cube.glb").unwrap();
 	entities.add_entity(
-		(&mut mesh_handles, &mut transform),
-		(MeshHandle("Cube.0".to_string()), Transform{
-			local: nalgebra_glm::translation(&Vec3::new(5.0, 0.0, 0.0)),
-			..Default::default()
-		}),
+		(&mut mesh_handles, &mut material_handle, &mut transform),
+		(
+			MeshHandle("Cube.0".to_string()),
+			MaterialHandle("standart".to_string()),
+			Transform{
+				local: nalgebra_glm::translation(&Vec3::new(5.0, 0.0, 0.0)),
+				..Default::default()
+			}
+		),
 	);
 	entities.add_entity(
-		(&mut mesh_handles, &mut transform),
-		(MeshHandle("Suzanne.0".to_string()), Transform::default()),
+		(&mut mesh_handles, &mut material_handle, &mut transform),
+		(
+			MeshHandle("Suzanne.0".to_string()),
+			MaterialHandle("standart".to_string()),
+			Transform::default()
+		),
 	);
 }
 
