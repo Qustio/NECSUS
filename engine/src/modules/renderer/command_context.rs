@@ -98,6 +98,7 @@ impl CommandContext {
 		let cmd = &self.commands[id];
 		let image = swapchain.images[id_image];
 		let depth = gbuffers[id_image].depth.image;
+		let shadow = gbuffers[id_image].shadow.image;
 
 		unsafe {
 			cmd.device.cmd_pipeline_barrier2(
@@ -130,6 +131,25 @@ impl CommandContext {
 						.old_layout(vk::ImageLayout::UNDEFINED)
 						.new_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
 						.image(depth)
+						.subresource_range(vk::ImageSubresourceRange {
+							aspect_mask: vk::ImageAspectFlags::DEPTH,
+							level_count: 1,
+							layer_count: 1,
+							..Default::default()
+						}),
+				]),
+			);
+			cmd.device.cmd_pipeline_barrier2(
+				cmd.buffer,
+				&vk::DependencyInfo::default().image_memory_barriers(&[
+					vk::ImageMemoryBarrier2::default()
+						.src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
+						.dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+						.src_access_mask(vk::AccessFlags2::NONE)
+						.dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+						.old_layout(vk::ImageLayout::UNDEFINED)
+						.new_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+						.image(shadow)
 						.subresource_range(vk::ImageSubresourceRange {
 							aspect_mask: vk::ImageAspectFlags::DEPTH,
 							level_count: 1,

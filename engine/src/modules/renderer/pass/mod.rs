@@ -10,6 +10,7 @@ use super::frame_sync::FrameSync;
 
 //pub mod back;
 pub mod main;
+pub mod shadow;
 
 pub use super::*;
 
@@ -23,7 +24,7 @@ pub struct PassManager {
 pub enum PassID {
 	Back,
 	Geometry,
-	//Shadow,
+	Shadow,
 	//Lighting
 }
 

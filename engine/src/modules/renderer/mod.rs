@@ -18,6 +18,7 @@ use crate::{
 		window::Window,
 	},
 };
+use nalgebra_glm::Vec3;
 use shipyard::{
 	AllStoragesViewMut, Label, UniqueView, UniqueViewMut, View, scheduler::IntoWorkloadTrySystem,
 };
@@ -45,6 +46,13 @@ impl Module for RendererModule {
 		engine.systems.push(
 			System::new(Box::new(Render), render_start.into_workload_try_system()?)
 				.before("Record"),
+		);
+		engine.systems.push(
+			System::new(
+				Box::new(Render),
+				render_record_shadows.into_workload_try_system()?,
+			)
+			.label("Record"),
 		);
 		engine.systems.push(
 			System::new(
@@ -178,6 +186,36 @@ fn render_record_main(
 	Ok(())
 }
 
+fn render_record_shadows(
+	frame_sync: UniqueView<frame_sync::FrameSync>,
+	shadow_pass: UniqueView<pass::shadow::Shadow>,
+	swapchain: UniqueView<swapchain::Swapchain>,
+	gbuffers: UniqueView<gbuffers::GBuffers>,
+	mesh_assets: UniqueView<mesh::MeshAssetManager>,
+	mesh_handles: View<mesh::MeshHandle>,
+	material_manager: UniqueView<material::MaterialManager>,
+	material_handles: View<material::MaterialHandle>,
+	transforms: View<components::Transform>,
+	light: UniqueView<components::DirectionalLight>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+	let _span = tracy_client::span!();
+	_span.emit_color(0xFF6600);
+
+	shadow_pass.record(
+		&frame_sync,
+		&swapchain,
+		&gbuffers,
+		&mesh_assets,
+		&mesh_handles,
+		&material_manager,
+		&material_handles,
+		&transforms,
+		&light
+	)?;
+	Ok(())
+}
+
+
 fn render_record_back(
 	frame_sync: UniqueView<frame_sync::FrameSync>,
 	//back_pass: UniqueView<pass::back::Back>,
@@ -208,6 +246,7 @@ fn render_submit(
 	cmd_ctx: UniqueView<command_context::CommandContext>,
 	swapchain: UniqueView<swapchain::Swapchain>,
 	main_pass: UniqueView<pass::main::Main>,
+	shadow_pass: UniqueView<pass::shadow::Shadow>,
 	//back_pass: UniqueView<pass::back::Back>,
 	imgui_pass: UniqueView<imgui::ImguiState>,
 	capture: UniqueView<debug_tools::FrameCapture>,
@@ -215,7 +254,7 @@ fn render_submit(
 	let _span = tracy_client::span!();
 	_span.emit_color(0x5566AA);
 
-	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &imgui_pass]);
+	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &shadow_pass, &imgui_pass]);
 	cmd_ctx.swapchain_to_present(&frame_sync, &swapchain, &capture)?;
 	cmd_ctx.end(&frame_sync)?;
 	cmd_ctx.submit(&frame_sync, &capture)?;
@@ -283,6 +322,10 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 		context.device.clone(),
 		swapchain.frame_count,
 	)?;
+	let shadow_pass = pass::shadow::Shadow::new(
+		context.device.clone(),
+		swapchain.frame_count,
+	)?;
 	// let back_pass = pass::back::Back::new(
 	// 	context.device.clone(),
 	// 	context.allocator.clone(),
@@ -326,6 +369,7 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 	world.add_unique(frame_sync);
 	world.add_unique(command_context);
 	world.add_unique(main_pass);
+	world.add_unique(shadow_pass);
 	//world.add_unique(back_pass);
 	world.add_unique(gbuffers);
 	world.add_unique(imgui_pass);
@@ -334,6 +378,10 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 	world.add_unique(mesh_assets);
 	world.add_unique(material_manager);
 	world.add_unique(camera);
+
+	world.add_unique(components::DirectionalLight{
+		direction: Vec3::x()
+	});
 
 	Ok(())
 }

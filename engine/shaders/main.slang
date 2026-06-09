@@ -35,3 +35,11 @@ float4 fragMain(VSOutput input) : SV_Target
 {
     return input.ndc;
 }
+
+[shader("vertex")]
+float4 shadow(float4 pos): SV_Position
+{
+    float4 o = mul(pc.proj, mul(pc.view, mul(pc.model, float4(pos.xyz, 1.0))));
+    o.w = 1.0;
+    return o;
+}

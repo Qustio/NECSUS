@@ -50,41 +50,21 @@ pub struct MaterialHandle(pub String);
 
 pub struct BindContext<'a> {
     pub transform: &'a crate::modules::components::Transform,
-    pub camera: &'a crate::modules::components::Camera,
+    pub camera: Option<&'a crate::modules::components::Camera>,
+	pub light: Option<&'a crate::modules::components::DirectionalLight>,
     pub extent: &'a vk::Extent2D,
     pub frame_id: usize,
 }
 
 pub trait Materal: Send + Sync {
     fn create_pipeline(&self) -> Result<Vec<(PassID, Pipeline)>, Box<dyn Error + Send + Sync>>;
-    fn bind(&self, cmd: &FrameCommand, pipeline: &Pipeline, ctx: &BindContext);
+    fn bind(&self, pass_id: PassID, cmd: &FrameCommand, pipeline: &Pipeline, ctx: &BindContext);
 }
 
 pub struct Pipeline {
 	pub pipeline: vk::Pipeline,
 	pub layout: vk::PipelineLayout,
-	device: Arc<Device>,
-}
-
-impl Pipeline {
-    fn create(
-        device: Arc<Device>,
-        infos: &[vk::GraphicsPipelineCreateInfo]
-    ) -> Result<Vec<Self>, Box<dyn Error + Send + Sync>> {
-        let raw_pipelines = unsafe {
-            device
-                .create_graphics_pipelines(vk::PipelineCache::null(), infos, None)
-                .map_err(|(_, e)| e)?
-        };
-        let pipelines = raw_pipelines.iter().zip(infos).map(|(pipeline, i)| {
-            Pipeline{
-                pipeline: *pipeline,
-                layout: i.layout,
-                device: device.clone(),
-            }
-        }).collect::<Vec<_>>();
-        Ok(pipelines)
-    }
+	pub device: Arc<Device>,
 }
 
 impl Drop for Pipeline {
@@ -97,7 +77,7 @@ impl Drop for Pipeline {
 }
 
 
-fn build_shader(
+pub fn build_shader(
 	name: &str,
 	entry_points: &[&str],
 ) -> Result<slang::Blob, Box<dyn Error + Send + Sync>> {

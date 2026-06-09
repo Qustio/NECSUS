@@ -86,3 +86,9 @@ impl Camera {
 		(yaw_rotation * pitch_rotation).into()
 	}
 }
+
+
+#[derive(Unique)]
+pub struct DirectionalLight {
+	pub direction: Vec3,
+}
