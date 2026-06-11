@@ -44,6 +44,7 @@ impl Main {
 		material_handles: &View<material::MaterialHandle>,
 		transforms: &View<components::Transform>,
 		camera: &components::Camera,
+		light: &components::DirectionalLight,
 	) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let id = frame_sync.frame_id as usize;
 		let id_image = frame_sync.acquired_image_index as usize;
@@ -118,9 +119,9 @@ impl Main {
 					camera: Some(camera),
 					extent: &swapchain.extent,
 					frame_id: id,
-					light: None
+					light: Some(light)
 				};
-				material.bind(PassID::Geometry, cmd, pipeline, &ctx);
+				material.bind(frame_sync.frame_id, PassID::Geometry, cmd, pipeline, &ctx);
 
 				cmd.device.cmd_bind_vertex_buffers(
 					cmd.buffer,

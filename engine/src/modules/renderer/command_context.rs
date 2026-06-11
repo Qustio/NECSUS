@@ -162,6 +162,42 @@ impl CommandContext {
 		Ok(())
 	}
 
+	pub(super) fn shadow_to_readable(
+		&self,
+		frame_sync: &FrameSync,
+		swapchain: &Swapchain,
+		gbuffers: &GBuffers,
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
+		let _span = tracy_client::span!();
+		let id = frame_sync.frame_id as usize;
+		let id_image = frame_sync.acquired_image_index as usize;
+		let cmd = &self.commands[id];
+		let shadow = gbuffers[id_image].shadow.image;
+
+		unsafe {
+			cmd.device.cmd_pipeline_barrier2(
+				cmd.buffer,
+				&vk::DependencyInfo::default().image_memory_barriers(&[
+					vk::ImageMemoryBarrier2::default()
+						.src_stage_mask(vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS)
+						.dst_stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)
+						.src_access_mask(vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE)
+						.dst_access_mask(vk::AccessFlags2::SHADER_SAMPLED_READ)
+						.old_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+						.new_layout(vk::ImageLayout::DEPTH_READ_ONLY_OPTIMAL)
+						.image(shadow)
+						.subresource_range(vk::ImageSubresourceRange {
+							aspect_mask: vk::ImageAspectFlags::DEPTH,
+							level_count: 1,
+							layer_count: 1,
+							..Default::default()
+						}),
+				]),
+			);
+		}
+		Ok(())
+	}
+
 	pub(super) fn swapchain_to_present(
 		&self,
 		frame_sync: &FrameSync,

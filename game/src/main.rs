@@ -1,6 +1,7 @@
 use std::error::Error;
 
-use engine::modules::components::Transform;
+use engine::modules::components::{DirectionalLight, Transform};
+use engine::modules::core::Time;
 use engine::modules::renderer::material::{MaterialHandle, MaterialManager};
 use engine::modules::renderer::mesh::{MeshAssetManager, MeshHandle, Vertex};
 use engine::modules::{
@@ -10,7 +11,7 @@ use engine::modules::{
 use engine::nalgebra_glm::Vec3;
 use engine::shipyard::{EntitiesViewMut, ViewMut};
 use engine::*;
-use shipyard::{UniqueViewMut, scheduler::IntoWorkloadSystem};
+use shipyard::{UniqueView, UniqueViewMut, scheduler::IntoWorkloadSystem};
 use tracing::{self};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
@@ -27,8 +28,19 @@ impl Module for GameModule {
 			Box::new(State::Startup),
 			spawn_objects.into_workload_system()?,
 		));
+		engine.systems.push(System::new(
+			Box::new(State::Update),
+			rotate_light.into_workload_system()?,
+		));
 		Ok(())
 	}
+}
+
+fn rotate_light(time: UniqueView<Time>, mut light: UniqueViewMut<DirectionalLight>) {
+	let dt = time.delta.as_secs_f32();
+	let speed = 0.5;
+	light.position = nalgebra_glm::rotate_vec3(&light.position, speed * dt, &Vec3::y());
+	light.direction = -light.position.normalize();
 }
 
 struct Demo;
@@ -54,10 +66,21 @@ fn spawn_objects(
 	entities.add_entity(
 		(&mut mesh_handles, &mut material_handle, &mut transform),
 		(
-			MeshHandle("Cube.0".to_string()),
+			MeshHandle("Cube.001.0".to_string()),
 			MaterialHandle("standart".to_string()),
 			Transform{
 				local: nalgebra_glm::translation(&Vec3::new(5.0, 0.0, 0.0)),
+				..Default::default()
+			}
+		),
+	);
+	entities.add_entity(
+		(&mut mesh_handles, &mut material_handle, &mut transform),
+		(
+			MeshHandle("Plane.0".to_string()),
+			MaterialHandle("standart".to_string()),
+			Transform{
+				local: nalgebra_glm::translation(&Vec3::new(0.0, -1.0, 0.0)),
 				..Default::default()
 			}
 		),

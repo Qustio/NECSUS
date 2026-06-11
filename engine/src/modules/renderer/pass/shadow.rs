@@ -49,6 +49,7 @@ impl Shadow {
 		let id = frame_sync.frame_id as usize;
 		let id_image = frame_sync.acquired_image_index as usize;
 		let cmd = &self.commands[id];
+		let shadow = gbuffers[id_image].shadow.image;
 		let shadow_view = gbuffers[id_image].shadow.view;
 		unsafe {
 			cmd.device
@@ -80,7 +81,7 @@ impl Shadow {
 						.load_op(vk::AttachmentLoadOp::CLEAR)
 						.store_op(vk::AttachmentStoreOp::STORE)
 						.clear_value(vk::ClearValue {
-							depth_stencil: vk::ClearDepthStencilValue { depth: 0.0, stencil: 0 },
+							depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 },
 						})
 					)
 			);
@@ -124,7 +125,7 @@ impl Shadow {
 					frame_id: id,
 					light: Some(&light)
 				};
-				material.bind(PassID::Shadow, cmd, pipeline, &ctx);
+				material.bind(frame_sync.frame_id, PassID::Shadow, cmd, pipeline, &ctx);
 
 				cmd.device.cmd_bind_vertex_buffers(
 					cmd.buffer,

@@ -20,7 +20,7 @@ use crate::{
 };
 use nalgebra_glm::Vec3;
 use shipyard::{
-	AllStoragesViewMut, Label, UniqueView, UniqueViewMut, View, scheduler::IntoWorkloadTrySystem,
+	AllStoragesViewMut, Borrow, BorrowInfo, Label, UniqueView, UniqueViewMut, View, scheduler::IntoWorkloadTrySystem
 };
 use std::{error::Error, sync::atomic::Ordering};
 use winit::event::WindowEvent;
@@ -141,47 +141,63 @@ fn render_start(
 fn capture_frame_ui(
 	mut draw_list: UniqueViewMut<UiDrawList>,
 	capture: UniqueView<debug_tools::FrameCapture>,
+	light: UniqueView<components::DirectionalLight>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
 	let pending = capture.pending.clone();
+	let d = light.position.clone();
+
 	draw_list.items.push(Box::new(move |ui: &::imgui::Ui| {
+		
 		ui.window("Capture frame").build(|| {
 			if ui.button("capture") {
 				tracing::info!("captured frame");
 				pending.store(true, Ordering::Relaxed);
 			}
 		});
+		ui.window("Light pos").build(|| {
+			ui.text_colored([1.0, 0.2, 0.2, 1.0], format!("x: {}", d.x));
+			ui.text_colored([0.2, 1.0, 0.2, 1.0], format!("y: {}", d.y));
+			ui.text_colored([0.2, 0.2, 1.0, 1.0], format!("z: {}", d.z));
+		});
 	}));
 	Ok(())
 }
 
+#[derive(Borrow, BorrowInfo)]
+struct MainRecordView<'v> {
+	frame_sync: UniqueView<'v, frame_sync::FrameSync>,
+	main_pass: UniqueView<'v, pass::main::Main>,
+	swapchain: UniqueView<'v, swapchain::Swapchain>,
+	gbuffers: UniqueView<'v, gbuffers::GBuffers>,
+	mesh_assets: UniqueView<'v, mesh::MeshAssetManager>,
+	mesh_handles: View<'v, mesh::MeshHandle>,
+	material_manager: UniqueView<'v, material::MaterialManager>,
+	material_handles: View<'v, material::MaterialHandle>,
+	transforms: View<'v, components::Transform>,
+	camera: UniqueView<'v, components::Camera>,
+	light: UniqueView<'v, components::DirectionalLight>,
+}
+
 fn render_record_main(
-	frame_sync: UniqueView<frame_sync::FrameSync>,
-	main_pass: UniqueView<pass::main::Main>,
-	swapchain: UniqueView<swapchain::Swapchain>,
-	gbuffers: UniqueView<gbuffers::GBuffers>,
-	mesh_assets: UniqueView<mesh::MeshAssetManager>,
-	mesh_handles: View<mesh::MeshHandle>,
-	material_manager: UniqueView<material::MaterialManager>,
-	material_handles: View<material::MaterialHandle>,
-	transforms: View<components::Transform>,
-	camera: UniqueView<components::Camera>,
+	view: MainRecordView,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
-	main_pass.record(
-		&frame_sync,
-		&swapchain,
-		&gbuffers,
-		&mesh_assets,
-		&mesh_handles,
-		&material_manager,
-		&material_handles,
-		&transforms,
-		&camera,
+	view.main_pass.record(
+		&view.frame_sync,
+		&view.swapchain,
+		&view.gbuffers,
+		&view.mesh_assets,
+		&view.mesh_handles,
+		&view.material_manager,
+		&view.material_handles,
+		&view.transforms,
+		&view.camera,
+		&view.light
 	)?;
 	Ok(())
 }
@@ -250,11 +266,14 @@ fn render_submit(
 	//back_pass: UniqueView<pass::back::Back>,
 	imgui_pass: UniqueView<imgui::ImguiState>,
 	capture: UniqueView<debug_tools::FrameCapture>,
+	gbuffers: UniqueView<gbuffers::GBuffers>
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0x5566AA);
 
-	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &shadow_pass, &imgui_pass]);
+	cmd_ctx.execute_commands(&frame_sync, &[&shadow_pass]);
+	cmd_ctx.shadow_to_readable(&frame_sync, &swapchain, &gbuffers)?;
+	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &imgui_pass]);
 	cmd_ctx.swapchain_to_present(&frame_sync, &swapchain, &capture)?;
 	cmd_ctx.end(&frame_sync)?;
 	cmd_ctx.submit(&frame_sync, &capture)?;
@@ -358,7 +377,8 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 	let mat = StandartMaterial::new(
 		context.device.clone(),
 		&swapchain,
-		&gbuffers
+		&gbuffers,
+		frame_sync.frame_count
 	)?;
 	material_manager.register("standart", Box::new(mat))?;
 
@@ -379,8 +399,11 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 	world.add_unique(material_manager);
 	world.add_unique(camera);
 
+	let position = Vec3::new(0.0, 5.0, 0.0);
+	let direction = Vec3::x()-Vec3::y().normalize();
 	world.add_unique(components::DirectionalLight{
-		direction: Vec3::x()
+		position,
+		direction
 	});
 
 	Ok(())

@@ -58,7 +58,7 @@ pub struct BindContext<'a> {
 
 pub trait Materal: Send + Sync {
     fn create_pipeline(&self) -> Result<Vec<(PassID, Pipeline)>, Box<dyn Error + Send + Sync>>;
-    fn bind(&self, pass_id: PassID, cmd: &FrameCommand, pipeline: &Pipeline, ctx: &BindContext);
+    fn bind(&self, id: u32, pass_id: PassID, cmd: &FrameCommand, pipeline: &Pipeline, ctx: &BindContext);
 }
 
 pub struct Pipeline {

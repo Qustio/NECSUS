@@ -90,5 +90,6 @@ impl Camera {
 
 #[derive(Unique)]
 pub struct DirectionalLight {
+	pub position: Vec3,
 	pub direction: Vec3,
 }
