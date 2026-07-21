@@ -28,9 +28,7 @@ impl Main {
 		let commands = (0..frame_count)
 			.map(|_| FrameCommand::new(device.clone(), vk::CommandBufferLevel::SECONDARY))
 			.collect::<Result<Vec<_>, _>>()?;
-		Ok(Self {
-			commands,
-		})
+		Ok(Self { commands })
 	}
 
 	pub(in super::super) fn record(
@@ -43,8 +41,7 @@ impl Main {
 		material_manager: &material::MaterialManager,
 		material_handles: &View<material::MaterialHandle>,
 		transforms: &View<components::Transform>,
-		camera: &components::Camera,
-		light: &components::DirectionalLight,
+		frame_uniforms: &material::standart::FrameUniforms,
 	) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let id = frame_sync.frame_id as usize;
 		let id_image = frame_sync.acquired_image_index as usize;
@@ -67,6 +64,8 @@ impl Main {
 						),
 					),
 			)?;
+			cmd.device
+				.cmd_begin_label(cmd.buffer, "main pass record", [1.0, 1.0, 1.0, 1.0]);
 			cmd.device.cmd_begin_rendering(
 				cmd.buffer,
 				&vk::RenderingInfo::default()
@@ -77,11 +76,12 @@ impl Main {
 						.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
 						.load_op(vk::AttachmentLoadOp::LOAD)
 						.store_op(vk::AttachmentStoreOp::STORE)])
-					.depth_attachment(&vk::RenderingAttachmentInfo::default()
-						.image_view(depth_view)
-						.image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-						.load_op(vk::AttachmentLoadOp::LOAD)
-						.store_op(vk::AttachmentStoreOp::STORE)
+					.depth_attachment(
+						&vk::RenderingAttachmentInfo::default()
+							.image_view(depth_view)
+							.image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+							.load_op(vk::AttachmentLoadOp::LOAD)
+							.store_op(vk::AttachmentStoreOp::STORE),
 					),
 			);
 			cmd.device.cmd_set_viewport(
@@ -105,9 +105,16 @@ impl Main {
 				}],
 			);
 			for (mesh, trans, mat_handle) in (mesh_handles, transforms, material_handles).iter() {
-				let Some(mesh_data) = mesh_assets.mesh_assets.get(&mesh.0) else { continue };
-				let Some(pipeline) = material_manager.get_pipeline(&mat_handle.0, PassID::Geometry) else { continue };
-				let Some(material) = material_manager.get_material(&mat_handle.0) else { continue };
+				let Some(mesh_data) = mesh_assets.mesh_assets.get(&mesh.0) else {
+					continue;
+				};
+				let Some(pipeline) = material_manager.get_pipeline(&mat_handle.0, PassID::Geometry)
+				else {
+					continue;
+				};
+				let Some(material) = material_manager.get_material(&mat_handle.0) else {
+					continue;
+				};
 
 				cmd.device.cmd_bind_pipeline(
 					cmd.buffer,
@@ -116,10 +123,10 @@ impl Main {
 				);
 				let ctx = material::BindContext {
 					transform: trans,
-					camera: Some(camera),
+					frame_uniforms,
+					light_view_proj: None,
 					extent: &swapchain.extent,
 					frame_id: id,
-					light: Some(light)
 				};
 				material.bind(frame_sync.frame_id, PassID::Geometry, cmd, pipeline, &ctx);
 
@@ -138,8 +145,8 @@ impl Main {
 				cmd.device
 					.cmd_draw_indexed(cmd.buffer, mesh_data.index_count(), 1, 0, 0, 0);
 			}
-
 			cmd.device.cmd_end_rendering(cmd.buffer);
+			cmd.device.cmd_end_label(cmd.buffer);
 			cmd.device.end_command_buffer(cmd.buffer)?;
 		}
 		Ok(())

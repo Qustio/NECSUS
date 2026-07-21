@@ -69,7 +69,7 @@ impl ImguiState {
 				depth_attachment_format: None,
 			},
 			&mut context,
-			Some(imgui_rs_vulkan_renderer::Options{
+			Some(imgui_rs_vulkan_renderer::Options {
 				in_flight_frames: frame_count as usize,
 				..Default::default()
 			}),
@@ -111,19 +111,18 @@ impl ImguiState {
 		unsafe {
 			cmd.device
 				.reset_command_pool(cmd.pool, vk::CommandPoolResetFlags::empty())?;
-			cmd.device
-				.begin_command_buffer(
-					cmd.buffer,
-					&vk::CommandBufferBeginInfo::default()
-						.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
-						.inheritance_info(
-							&vk::CommandBufferInheritanceInfo::default().push_next(
-								&mut vk::CommandBufferInheritanceRenderingInfo::default()
-									.color_attachment_formats(&[self.image_format])
-									.rasterization_samples(vk::SampleCountFlags::TYPE_1),
-							),
+			cmd.device.begin_command_buffer(
+				cmd.buffer,
+				&vk::CommandBufferBeginInfo::default()
+					.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+					.inheritance_info(
+						&vk::CommandBufferInheritanceInfo::default().push_next(
+							&mut vk::CommandBufferInheritanceRenderingInfo::default()
+								.color_attachment_formats(&[self.image_format])
+								.rasterization_samples(vk::SampleCountFlags::TYPE_1),
 						),
-				)?;
+					),
+			)?;
 			cmd.device.cmd_begin_rendering(
 				cmd.buffer,
 				&vk::RenderingInfo::default()

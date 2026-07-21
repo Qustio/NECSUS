@@ -144,16 +144,19 @@ impl CommandContext {
 				&vk::DependencyInfo::default().image_memory_barriers(&[
 					vk::ImageMemoryBarrier2::default()
 						.src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
-						.dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+						.dst_stage_mask(
+							vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+								| vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+						)
 						.src_access_mask(vk::AccessFlags2::NONE)
-						.dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+						.dst_access_mask(vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE)
 						.old_layout(vk::ImageLayout::UNDEFINED)
 						.new_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
 						.image(shadow)
 						.subresource_range(vk::ImageSubresourceRange {
 							aspect_mask: vk::ImageAspectFlags::DEPTH,
 							level_count: 1,
-							layer_count: 1,
+							layer_count: vk::REMAINING_ARRAY_LAYERS,
 							..Default::default()
 						}),
 				]),
@@ -189,7 +192,7 @@ impl CommandContext {
 						.subresource_range(vk::ImageSubresourceRange {
 							aspect_mask: vk::ImageAspectFlags::DEPTH,
 							level_count: 1,
-							layer_count: 1,
+							layer_count: vk::REMAINING_ARRAY_LAYERS,
 							..Default::default()
 						}),
 				]),
@@ -382,27 +385,27 @@ impl CommandContext {
 				&vk::RenderingInfo::default()
 					.render_area(vk::Rect2D::default().extent(swapchain.extent))
 					.layer_count(1)
-					.color_attachments(&[
-						vk::RenderingAttachmentInfo::default()
-							.image_view(image_view)
-							.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-							.load_op(vk::AttachmentLoadOp::CLEAR)
-							.store_op(vk::AttachmentStoreOp::STORE)
-							.clear_value(vk::ClearValue {
-								color: vk::ClearColorValue { float32: [0.0; 4] },
-							}),
-					])
-					.depth_attachment(&vk::RenderingAttachmentInfo::default()
-						.image_view(depth_view)
-						.image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+					.color_attachments(&[vk::RenderingAttachmentInfo::default()
+						.image_view(image_view)
+						.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
 						.load_op(vk::AttachmentLoadOp::CLEAR)
 						.store_op(vk::AttachmentStoreOp::STORE)
 						.clear_value(vk::ClearValue {
-							depth_stencil: vk::ClearDepthStencilValue {
-								depth: 0.0,
-								stencil: 0,
-							},
-					}))
+							color: vk::ClearColorValue { float32: [0.0; 4] },
+						})])
+					.depth_attachment(
+						&vk::RenderingAttachmentInfo::default()
+							.image_view(depth_view)
+							.image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+							.load_op(vk::AttachmentLoadOp::CLEAR)
+							.store_op(vk::AttachmentStoreOp::STORE)
+							.clear_value(vk::ClearValue {
+								depth_stencil: vk::ClearDepthStencilValue {
+									depth: 0.0,
+									stencil: 0,
+								},
+							}),
+					),
 			);
 		}
 		Ok(())
@@ -463,13 +466,17 @@ impl CommandContext {
 				*queue,
 				&[vk::SubmitInfo2::default()
 					.wait_semaphore_infos(&[vk::SemaphoreSubmitInfo::default()
-						.semaphore(frame_sync.image_availabe[frame_sync.acquired_image_index as usize])
+						.semaphore(
+							frame_sync.image_availabe[frame_sync.acquired_image_index as usize],
+						)
 						.stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)])
 					.command_buffer_infos(&[
 						vk::CommandBufferSubmitInfo::default().command_buffer(cmd.buffer)
 					])
 					.signal_semaphore_infos(&[vk::SemaphoreSubmitInfo::default()
-						.semaphore(frame_sync.render_finished[frame_sync.acquired_image_index as usize])
+						.semaphore(
+							frame_sync.render_finished[frame_sync.acquired_image_index as usize],
+						)
 						.stage_mask(vk::PipelineStageFlags2::ALL_GRAPHICS)])],
 				frame_sync.fences[frame],
 			)?;

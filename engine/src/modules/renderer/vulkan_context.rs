@@ -220,6 +220,8 @@ pub struct Device {
 	pub(super) physical_device: vk::PhysicalDevice,
 	pub(super) graphics_queue_index: u32,
 	pub graphics_queue: Mutex<vk::Queue>,
+	#[cfg(any(feature = "gpu_label"))]
+	debug_utils: ext::debug_utils::Device,
 	_instance: Arc<Instance>,
 }
 
@@ -270,7 +272,7 @@ impl Device {
 				khr::swapchain::NAME.as_ptr(),
 				khr::shader_non_semantic_info::NAME.as_ptr(),
 				khr::buffer_device_address::NAME.as_ptr(),
-				ext::host_query_reset::NAME.as_ptr()
+				ext::host_query_reset::NAME.as_ptr(),
 			];
 
 			let mut extensions13 = vk::PhysicalDeviceVulkan13Features::default()
@@ -292,13 +294,64 @@ impl Device {
 
 		let queue = unsafe { device.get_device_queue(queue_family_index, 0) };
 
+		#[cfg(any(feature = "gpu_label"))]
+		let debug_utils = ext::debug_utils::Device::new(&instance, &device);
+
 		Ok(Arc::new(Self {
 			device,
 			physical_device,
 			graphics_queue_index: queue_family_index,
 			graphics_queue: Mutex::new(queue),
 			_instance: instance,
+			#[cfg(any(feature = "gpu_label"))]
+			debug_utils,
 		}))
+	}
+
+	#[cfg(any(feature = "gpu_label"))]
+	pub fn cmd_begin_label(&self, cmd: vk::CommandBuffer, name: &str, color: [f32; 4]) {
+		let name = CString::new(name).unwrap_or_default();
+		unsafe {
+			self.debug_utils.cmd_begin_debug_utils_label(
+				cmd,
+				&vk::DebugUtilsLabelEXT::default()
+					.label_name(&name)
+					.color(color),
+			);
+		}
+	}
+
+	#[cfg(any(feature = "gpu_label"))]
+	pub fn cmd_end_label(&self, cmd: vk::CommandBuffer) {
+		unsafe {
+			self.debug_utils.cmd_end_debug_utils_label(cmd);
+		}
+	}
+
+	#[cfg(any(feature = "gpu_label"))]
+	pub fn cmd_insert_label(&self, cmd: vk::CommandBuffer, name: &str, color: [f32; 4]) {
+		let name = CString::new(name).unwrap_or_default();
+		unsafe {
+			self.debug_utils.cmd_insert_debug_utils_label(
+				cmd,
+				&vk::DebugUtilsLabelEXT::default()
+					.label_name(&name)
+					.color(color),
+			);
+		}
+	}
+
+	#[cfg(any(feature = "gpu_label"))]
+	pub fn set_label<T: vk::Handle>(&self, object_handle: T, name: &str) {
+		let name = CString::new(name).unwrap_or_default();
+		unsafe {
+			let name_info = vk::DebugUtilsObjectNameInfoEXT::default()
+				.object_handle(object_handle)
+				.object_name(&name);
+			self.debug_utils
+				.set_debug_utils_object_name(&name_info)
+				.unwrap();
+		}
 	}
 
 	pub fn wait_queue(&self) -> Result<(), Box<dyn Error + Send + Sync>> {

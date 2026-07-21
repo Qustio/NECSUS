@@ -5,22 +5,29 @@ pub mod debug_tools;
 pub mod frame_sync;
 pub mod gbuffers;
 pub mod imgui;
+pub mod light;
+pub mod material;
 pub mod mesh;
 pub mod pass;
 pub mod swapchain;
 pub mod vulkan_context;
-pub mod material;
 
 use crate::{
 	State,
 	modules::{
-		self, Module, System, components, core::AppData, renderer::{imgui::UiDrawList, material::standart::StandartMaterial},
+		self, Module, System, components,
+		core::{AppData, Time},
+		renderer::{
+			imgui::UiDrawList,
+			material::standart::{FrameUniforms, StandartMaterial},
+		},
 		window::Window,
 	},
 };
 use nalgebra_glm::Vec3;
 use shipyard::{
-	AllStoragesViewMut, Borrow, BorrowInfo, Label, UniqueView, UniqueViewMut, View, scheduler::IntoWorkloadTrySystem
+	AllStoragesViewMut, Borrow, BorrowInfo, IntoIter, Label, UniqueView, UniqueViewMut, View,
+	scheduler::IntoWorkloadTrySystem,
 };
 use std::{error::Error, sync::atomic::Ordering};
 use winit::event::WindowEvent;
@@ -45,7 +52,16 @@ impl Module for RendererModule {
 		));
 		engine.systems.push(
 			System::new(Box::new(Render), render_start.into_workload_try_system()?)
+				.label("FrameStart")
 				.before("Record"),
+		);
+		engine.systems.push(
+			System::new(
+				Box::new(Render),
+				render_update_frame_uniforms.into_workload_try_system()?,
+			)
+			.after("FrameStart")
+			.before("Record"),
 		);
 		engine.systems.push(
 			System::new(
@@ -141,27 +157,28 @@ fn render_start(
 fn capture_frame_ui(
 	mut draw_list: UniqueViewMut<UiDrawList>,
 	capture: UniqueView<debug_tools::FrameCapture>,
-	light: UniqueView<components::DirectionalLight>,
+	lights: View<light::DirectionalLight>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
 	let pending = capture.pending.clone();
-	let d = light.position.clone();
+	let positions: Vec<Vec3> = lights.iter().map(|l| l.position).collect();
 
 	draw_list.items.push(Box::new(move |ui: &::imgui::Ui| {
-		
 		ui.window("Capture frame").build(|| {
 			if ui.button("capture") {
 				tracing::info!("captured frame");
 				pending.store(true, Ordering::Relaxed);
 			}
 		});
-		ui.window("Light pos").build(|| {
-			ui.text_colored([1.0, 0.2, 0.2, 1.0], format!("x: {}", d.x));
-			ui.text_colored([0.2, 1.0, 0.2, 1.0], format!("y: {}", d.y));
-			ui.text_colored([0.2, 0.2, 1.0, 1.0], format!("z: {}", d.z));
-		});
+		for (i, d) in positions.iter().enumerate() {
+			ui.window(format!("Light {} pos", i)).build(|| {
+				ui.text_colored([1.0, 0.2, 0.2, 1.0], format!("x: {}", d.x));
+				ui.text_colored([0.2, 1.0, 0.2, 1.0], format!("y: {}", d.y));
+				ui.text_colored([0.2, 0.2, 1.0, 1.0], format!("z: {}", d.z));
+			});
+		}
 	}));
 	Ok(())
 }
@@ -177,13 +194,10 @@ struct MainRecordView<'v> {
 	material_manager: UniqueView<'v, material::MaterialManager>,
 	material_handles: View<'v, material::MaterialHandle>,
 	transforms: View<'v, components::Transform>,
-	camera: UniqueView<'v, components::Camera>,
-	light: UniqueView<'v, components::DirectionalLight>,
+	frame_uniforms: UniqueView<'v, FrameUniforms>,
 }
 
-fn render_record_main(
-	view: MainRecordView,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn render_record_main(view: MainRecordView) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
@@ -196,8 +210,7 @@ fn render_record_main(
 		&view.material_manager,
 		&view.material_handles,
 		&view.transforms,
-		&view.camera,
-		&view.light
+		&view.frame_uniforms,
 	)?;
 	Ok(())
 }
@@ -212,7 +225,7 @@ fn render_record_shadows(
 	material_manager: UniqueView<material::MaterialManager>,
 	material_handles: View<material::MaterialHandle>,
 	transforms: View<components::Transform>,
-	light: UniqueView<components::DirectionalLight>,
+	frame_uniforms: UniqueView<FrameUniforms>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
@@ -226,11 +239,32 @@ fn render_record_shadows(
 		&material_manager,
 		&material_handles,
 		&transforms,
-		&light
+		&frame_uniforms,
 	)?;
 	Ok(())
 }
 
+fn render_update_frame_uniforms(
+	frame_sync: UniqueView<frame_sync::FrameSync>,
+	swapchain: UniqueView<swapchain::Swapchain>,
+	frame_uniforms: UniqueView<FrameUniforms>,
+	camera: UniqueView<components::Camera>,
+	time: UniqueView<Time>,
+	lights: View<light::DirectionalLight>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+	let _span = tracy_client::span!();
+	_span.emit_color(0xFF2255);
+
+	let id = frame_sync.frame_id as usize;
+	frame_uniforms.update(
+		id,
+		&swapchain.extent,
+		&camera,
+		time.elapsed.as_secs_f32(),
+		&lights,
+	);
+	Ok(())
+}
 
 fn render_record_back(
 	frame_sync: UniqueView<frame_sync::FrameSync>,
@@ -266,7 +300,7 @@ fn render_submit(
 	//back_pass: UniqueView<pass::back::Back>,
 	imgui_pass: UniqueView<imgui::ImguiState>,
 	capture: UniqueView<debug_tools::FrameCapture>,
-	gbuffers: UniqueView<gbuffers::GBuffers>
+	gbuffers: UniqueView<gbuffers::GBuffers>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0x5566AA);
@@ -326,7 +360,7 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 		context.device.clone(),
 		context.surface.clone(),
 		size,
-		None
+		None,
 	)?;
 
 	// Frame sync data
@@ -337,14 +371,8 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 		command_context::CommandContext::new(context.device.clone(), swapchain.frame_count)?;
 
 	// Create passes
-	let main_pass = pass::main::Main::new(
-		context.device.clone(),
-		swapchain.frame_count,
-	)?;
-	let shadow_pass = pass::shadow::Shadow::new(
-		context.device.clone(),
-		swapchain.frame_count,
-	)?;
+	let main_pass = pass::main::Main::new(context.device.clone(), swapchain.frame_count)?;
+	let shadow_pass = pass::shadow::Shadow::new(context.device.clone(), swapchain.frame_count)?;
 	// let back_pass = pass::back::Back::new(
 	// 	context.device.clone(),
 	// 	context.allocator.clone(),
@@ -372,13 +400,20 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 		swapchain.format.format,
 	)?;
 
+	let frame_uniforms = FrameUniforms::new(
+		context.device.clone(),
+		context.allocator.clone(),
+		swapchain.frame_count,
+	)?;
+
 	let mesh_assets = mesh::MeshAssetManager::new(context.allocator.clone())?;
 	let mut material_manager = material::MaterialManager::new()?;
 	let mat = StandartMaterial::new(
 		context.device.clone(),
 		&swapchain,
 		&gbuffers,
-		frame_sync.frame_count
+		&frame_uniforms,
+		frame_sync.frame_count,
 	)?;
 	material_manager.register("standart", Box::new(mat))?;
 
@@ -398,13 +433,7 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 	world.add_unique(mesh_assets);
 	world.add_unique(material_manager);
 	world.add_unique(camera);
-
-	let position = Vec3::new(0.0, 5.0, 0.0);
-	let direction = Vec3::x()-Vec3::y().normalize();
-	world.add_unique(components::DirectionalLight{
-		position,
-		direction
-	});
+	world.add_unique(frame_uniforms);
 
 	Ok(())
 }

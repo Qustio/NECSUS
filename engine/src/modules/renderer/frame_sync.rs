@@ -39,9 +39,7 @@ impl FrameSync {
 			.into_iter()
 			.multiunzip();
 		let acquire_semaphores = (0..frame_count)
-			.map(|_| unsafe {
-				device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
-			})
+			.map(|_| unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) })
 			.collect::<VkResult<Vec<_>>>()?;
 		Ok(Self {
 			acquire_semaphores,

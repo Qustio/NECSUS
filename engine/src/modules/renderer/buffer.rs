@@ -65,6 +65,57 @@ impl<T> Buffer<T> {
 		Ok(buf)
 	}
 
+	pub(super) fn new_uniform(
+		allocator: Arc<Allocator>,
+	) -> Result<Self, Box<dyn Error + Send + Sync>> {
+		Self::new(
+			allocator,
+			size_of::<T>() as vk::DeviceSize,
+			vk::BufferUsageFlags::UNIFORM_BUFFER,
+			vk_mem::MemoryUsage::AutoPreferHost,
+			vk_mem::AllocationCreateFlags::MAPPED
+				| vk_mem::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
+		)
+	}
+
+	pub(super) fn write(&self, data: &T)
+	where
+		T: Copy,
+	{
+		unsafe {
+			let info = self.allocation_info();
+			std::ptr::copy_nonoverlapping::<T>(data as *const T, info.mapped_data as *mut T, 1);
+		}
+	}
+
+	pub(super) fn new_storage(
+		allocator: Arc<Allocator>,
+		capacity: usize,
+	) -> Result<Self, Box<dyn Error + Send + Sync>> {
+		Self::new(
+			allocator,
+			(capacity * size_of::<T>()) as vk::DeviceSize,
+			vk::BufferUsageFlags::STORAGE_BUFFER,
+			vk_mem::MemoryUsage::AutoPreferHost,
+			vk_mem::AllocationCreateFlags::MAPPED
+				| vk_mem::AllocationCreateFlags::HOST_ACCESS_SEQUENTIAL_WRITE,
+		)
+	}
+
+	pub(super) fn write_slice(&self, data: &[T])
+	where
+		T: Copy,
+	{
+		unsafe {
+			let info = self.allocation_info();
+			std::ptr::copy_nonoverlapping::<T>(
+				data.as_ptr(),
+				info.mapped_data as *mut T,
+				data.len(),
+			);
+		}
+	}
+
 	pub(super) fn buffer(&self) -> vk::Buffer {
 		self.buffer
 	}

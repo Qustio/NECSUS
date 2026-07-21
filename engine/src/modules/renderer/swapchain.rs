@@ -18,7 +18,7 @@ pub struct Swapchain {
 	pub frame_count: u32,
 	surface: Arc<Surface>,
 	device: Arc<Device>,
-	instance: Arc<Instance>
+	instance: Arc<Instance>,
 }
 
 impl Swapchain {
@@ -27,7 +27,7 @@ impl Swapchain {
 		device: Arc<Device>,
 		surface: Arc<Surface>,
 		size: PhysicalSize<u32>,
-		old_swapchain: Option<vk::SwapchainKHR>
+		old_swapchain: Option<vk::SwapchainKHR>,
 	) -> Result<Self, Box<dyn Error + Send + Sync>> {
 		let swapchain_loader = khr::swapchain::Device::new(&instance, &device);
 
@@ -73,6 +73,10 @@ impl Swapchain {
 		tracing::info!("max: {:?}", capabilities.max_image_extent);
 		tracing::info!("min: {:?}", capabilities.min_image_extent);
 		let extent = capabilities.current_extent;
+		// let extent = vk::Extent2D {
+		// 	width: size.width,
+		// 	height: size.height
+		// };
 		tracing::info!("extent: {:?}", extent);
 
 		let old_swapchain = old_swapchain.unwrap_or(vk::SwapchainKHR::null());
@@ -160,7 +164,10 @@ impl Swapchain {
 		frame_sync.acquire_sem_idx = (frame_sync.acquire_sem_idx + 1) % self.frame_count;
 		frame_sync.acquired_image_index = id;
 		tracy_client::plot!("frame_id", frame_sync.frame_id as f64);
-		tracy_client::plot!("acquired_image_index", frame_sync.acquired_image_index as f64);
+		tracy_client::plot!(
+			"acquired_image_index",
+			frame_sync.acquired_image_index as f64
+		);
 		Ok(subopt)
 	}
 
@@ -175,7 +182,7 @@ impl Swapchain {
 			self.device.clone(),
 			self.surface.clone(),
 			size,
-			Some(self.swapchain)
+			Some(self.swapchain),
 		)?;
 		Ok(self.extent)
 	}

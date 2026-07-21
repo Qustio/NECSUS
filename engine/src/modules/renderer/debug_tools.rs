@@ -45,13 +45,11 @@ impl FrameCapture {
 			allocator.create_image(
 				&vk::ImageCreateInfo::default()
 					.image_type(vk::ImageType::TYPE_2D)
-					.extent(
-						vk::Extent3D{
-							width: extent.width,
-							height: extent.height,
-							depth: 1,
-						},
-					)
+					.extent(vk::Extent3D {
+						width: extent.width,
+						height: extent.height,
+						depth: 1,
+					})
 					.usage(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST)
 					.sharing_mode(vk::SharingMode::EXCLUSIVE)
 					.samples(vk::SampleCountFlags::TYPE_1)

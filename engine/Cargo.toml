@@ -27,4 +27,4 @@ slang = { version = "0.1.0", git = "https://github.com/FloatyMonkey/slang-rs", p
 
 [features]
 tracy = ["dep:tracy", "tracy-client/enable"]
-
+gpu_label = []

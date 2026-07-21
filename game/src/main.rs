@@ -1,7 +1,8 @@
 use std::error::Error;
 
-use engine::modules::components::{DirectionalLight, Transform};
+use engine::modules::components::Transform;
 use engine::modules::core::Time;
+use engine::modules::renderer::light::{self, DirectionalLight};
 use engine::modules::renderer::material::{MaterialHandle, MaterialManager};
 use engine::modules::renderer::mesh::{MeshAssetManager, MeshHandle, Vertex};
 use engine::modules::{
@@ -9,13 +10,13 @@ use engine::modules::{
 	renderer::imgui::{UiDrawList, UiDrawable},
 };
 use engine::nalgebra_glm::Vec3;
-use engine::shipyard::{EntitiesViewMut, ViewMut};
+use engine::shipyard::{EntitiesViewMut, IntoIter, ViewMut};
 use engine::*;
 use shipyard::{UniqueView, UniqueViewMut, scheduler::IntoWorkloadSystem};
 use tracing::{self};
-use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::Layer;
 use tracing_subscriber::fmt;
+use tracing_subscriber::layer::SubscriberExt;
 
 struct GameModule;
 impl Module for GameModule {
@@ -36,11 +37,13 @@ impl Module for GameModule {
 	}
 }
 
-fn rotate_light(time: UniqueView<Time>, mut light: UniqueViewMut<DirectionalLight>) {
+fn rotate_light(time: UniqueView<Time>, mut lights: ViewMut<DirectionalLight>) {
 	let dt = time.delta.as_secs_f32();
 	let speed = 0.5;
-	light.position = nalgebra_glm::rotate_vec3(&light.position, speed * dt, &Vec3::y());
-	light.direction = -light.position.normalize();
+	for light in (&mut lights).iter() {
+		light.position = nalgebra_glm::rotate_vec3(&light.position, speed * dt, &Vec3::y());
+		light.direction = -light.position.normalize();
+	}
 }
 
 struct Demo;
@@ -60,18 +63,38 @@ fn spawn_objects(
 	mut material_handle: ViewMut<MaterialHandle>,
 	mut mesh_handles: ViewMut<MeshHandle>,
 	mut transform: ViewMut<Transform>,
+	mut light: ViewMut<DirectionalLight>,
 ) {
 	mesh_assets.load_gltf::<Vertex>("suzanne.glb").unwrap();
 	mesh_assets.load_gltf::<Vertex>("cube.glb").unwrap();
+	entities.add_entity(
+		(&mut light),
+		(light::DirectionalLight {
+			position: Vec3::new(-10.0, 5.0, 0.0),
+			direction: Vec3::new(-4.0, 1.0, 0.0).normalize(),
+			cast_shadow: true,
+			check_outside: false,
+		}),
+	);
+	entities.add_entity(
+		(&mut light),
+		(light::DirectionalLight {
+			position: Vec3::new(10.0, 5.0, 0.0),
+			direction: Vec3::new(4.0, 1.0, 0.0).normalize(),
+			cast_shadow: true,
+			check_outside: false,
+		}),
+	);
 	entities.add_entity(
 		(&mut mesh_handles, &mut material_handle, &mut transform),
 		(
 			MeshHandle("Cube.001.0".to_string()),
 			MaterialHandle("standart".to_string()),
-			Transform{
-				local: nalgebra_glm::translation(&Vec3::new(5.0, 0.0, 0.0)),
+			Transform {
+				local: nalgebra_glm::translation(&Vec3::new(3.5, 0.0, 0.0))
+					* nalgebra_glm::rotation(45.0_f32.to_radians(), &Vec3::y()),
 				..Default::default()
-			}
+			},
 		),
 	);
 	entities.add_entity(
@@ -79,10 +102,10 @@ fn spawn_objects(
 		(
 			MeshHandle("Plane.0".to_string()),
 			MaterialHandle("standart".to_string()),
-			Transform{
+			Transform {
 				local: nalgebra_glm::translation(&Vec3::new(0.0, -1.0, 0.0)),
 				..Default::default()
-			}
+			},
 		),
 	);
 	entities.add_entity(
@@ -90,7 +113,7 @@ fn spawn_objects(
 		(
 			MeshHandle("Suzanne.0".to_string()),
 			MaterialHandle("standart".to_string()),
-			Transform::default()
+			Transform::default(),
 		),
 	);
 }

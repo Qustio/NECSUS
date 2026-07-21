@@ -16,14 +16,20 @@ impl Module for CoreModule {
 			Box::new(State::Startup),
 			startup.into_workload_system()?,
 		));
-		engine.systems.push(System::new(
-			Box::new(State::PreUpdate),
-			update_fixed_time.into_workload_system()?
-		).before("Time"));
-		engine.systems.push(System::new(
-			Box::new(State::PreUpdate),
-			update_time.into_workload_system()?,
-		).label("Time"));
+		engine.systems.push(
+			System::new(
+				Box::new(State::PreUpdate),
+				update_fixed_time.into_workload_system()?,
+			)
+			.before("Time"),
+		);
+		engine.systems.push(
+			System::new(
+				Box::new(State::PreUpdate),
+				update_time.into_workload_system()?,
+			)
+			.label("Time"),
+		);
 		Ok(())
 	}
 }
@@ -90,7 +96,7 @@ fn startup(world: AllStoragesViewMut) {
 		last_frame: Instant::now(),
 	});
 	world.add_unique(FixedTime {
-		step: Duration::from_millis(1000/16),
+		step: Duration::from_millis(1000 / 16),
 		accumulator: Duration::ZERO,
 	});
 }

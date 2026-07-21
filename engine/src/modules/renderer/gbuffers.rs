@@ -4,8 +4,10 @@ use std::sync::Arc;
 use ash::*;
 use shipyard::Unique;
 
-use super::vulkan_context::{Allocator, Device};
 use super::allocated_image::AllocatedImage;
+use super::vulkan_context::{Allocator, Device};
+
+pub(super) const MAX_SHADOW_CASTERS: u32 = 4;
 
 #[derive(Unique, derive_more::Deref)]
 pub(super) struct GBuffers {
@@ -39,14 +41,15 @@ impl GBuffers {
 					extent,
 					shadow_resolution,
 					allocator.clone(),
-					device.clone()
+					device.clone(),
 				)
-		}).collect::<Result<Vec<_>, _>>()?;
+			})
+			.collect::<Result<Vec<_>, _>>()?;
 		Ok(Self {
 			gbuffers,
-    		depth_format,
+			depth_format,
 			shadow_format,
-			shadow_resolution
+			shadow_resolution,
 		})
 	}
 
@@ -78,30 +81,27 @@ impl GBuffer {
 			vk::ImageAspectFlags::DEPTH,
 			vk_mem::AllocationCreateFlags::DEDICATED_MEMORY,
 			allocator.clone(),
-			device.clone()
+			device.clone(),
 		)?;
-		let shadow = AllocatedImage::new(
-			depth_format,
-			vk::Extent2D{
+		device.set_label(depth.image, "q_depth_image");
+		let shadow = AllocatedImage::new_array(
+			shadow_format,
+			vk::Extent2D {
 				width: shadow_resolution,
 				height: shadow_resolution,
 			},
-			vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+			MAX_SHADOW_CASTERS,
+			vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
 			vk::ImageAspectFlags::DEPTH,
 			vk_mem::AllocationCreateFlags::DEDICATED_MEMORY,
 			allocator.clone(),
-			device.clone()
+			device.clone(),
 		)?;
-		Ok(Self {
-			depth,
-			shadow
-		})
+		device.set_label(shadow.image, "q_shadow_image");
+		Ok(Self { depth, shadow })
 	}
 
-	fn resize(
-		&mut self,
-		extent: vk::Extent2D,
-	) -> Result<(), Box<dyn Error + Send + Sync>> {
+	fn resize(&mut self, extent: vk::Extent2D) -> Result<(), Box<dyn Error + Send + Sync>> {
 		self.depth.resize(extent)?;
 		Ok(())
 	}
