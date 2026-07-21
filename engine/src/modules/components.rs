@@ -5,16 +5,24 @@ use shipyard::*;
 #[derive(Debug, Component, Clone, Copy)]
 #[repr(C)]
 pub struct Transform {
-	pub local: Mat4,
-	pub world: Mat4,
+	pub translation: Vec3,
+	pub rotation: UnitQuaternion<f32>,
+	pub scale: Vec3,
 }
 
 impl Default for Transform {
 	fn default() -> Self {
 		Self {
-			local: Matrix4::identity(),
-			world: Matrix4::identity(),
+			translation: Vec3::zeros(),
+			rotation: UnitQuaternion::identity(),
+			scale: Vec3::new(1.0, 1.0, 1.0),
 		}
+	}
+}
+
+impl Transform {
+	pub fn compute_matrix(&self) -> Mat4 {
+		nalgebra_glm::translation(&self.translation) * self.rotation.to_homogeneous() * nalgebra_glm::scaling(&self.scale)
 	}
 }
 

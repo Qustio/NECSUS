@@ -600,7 +600,7 @@ impl Materal for StandartMaterial {
 	) {
 		unsafe {
 			let constant = DrawConstants {
-				model: ctx.transform.local,
+				model: ctx.transform.compute_matrix(),
 				light_view_proj: ctx.light_view_proj.unwrap_or_else(Mat4::identity),
 			};
 			match pass_id {

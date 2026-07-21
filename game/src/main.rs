@@ -2,6 +2,7 @@ use std::error::Error;
 
 use engine::modules::components::Transform;
 use engine::modules::core::Time;
+use engine::modules::physics::{Collider, ColliderBuilder, RapierData, RigidBody};
 use engine::modules::renderer::light::{self, DirectionalLight};
 use engine::modules::renderer::material::{MaterialHandle, MaterialManager};
 use engine::modules::renderer::mesh::{MeshAssetManager, MeshHandle, Vertex};
@@ -9,6 +10,7 @@ use engine::modules::{
 	Module, System,
 	renderer::imgui::{UiDrawList, UiDrawable},
 };
+use engine::nalgebra::UnitQuaternion;
 use engine::nalgebra_glm::Vec3;
 use engine::shipyard::{EntitiesViewMut, IntoIter, ViewMut};
 use engine::*;
@@ -64,6 +66,9 @@ fn spawn_objects(
 	mut mesh_handles: ViewMut<MeshHandle>,
 	mut transform: ViewMut<Transform>,
 	mut light: ViewMut<DirectionalLight>,
+	mut phycics: UniqueViewMut<RapierData>,
+	mut rigid_bodies: ViewMut<RigidBody>,
+	mut colliders: ViewMut<Collider>,
 ) {
 	mesh_assets.load_gltf::<Vertex>("suzanne.glb").unwrap();
 	mesh_assets.load_gltf::<Vertex>("cube.glb").unwrap();
@@ -85,27 +90,63 @@ fn spawn_objects(
 			check_outside: false,
 		}),
 	);
-	entities.add_entity(
-		(&mut mesh_handles, &mut material_handle, &mut transform),
-		(
-			MeshHandle("Cube.001.0".to_string()),
-			MaterialHandle("standart".to_string()),
-			Transform {
-				local: nalgebra_glm::translation(&Vec3::new(3.5, 0.0, 0.0))
-					* nalgebra_glm::rotation(45.0_f32.to_radians(), &Vec3::y()),
-				..Default::default()
-			},
-		),
+	{
+		let t = Transform {
+			translation: Vec3::new(3.5, 10.0, 0.0),
+			rotation: UnitQuaternion::from_axis_angle(&Vec3::x_axis(), 35f32.to_radians()),
+			..Default::default()
+		};
+		let (rbh, ch) = phycics.insert_dynamic(
+			t,
+			ColliderBuilder::cuboid(1.0, 1.0, 1.0)
+			//.rotation(t.rotation.scaled_axis().into())
+			.mass(10.0)
+			.friction(0.05)
+			.build()
+		);
+		entities.add_entity(
+			(
+				&mut mesh_handles,
+				&mut material_handle,
+				&mut transform,
+				&mut rigid_bodies,
+				&mut colliders,
+			),
+			(
+				MeshHandle("Cube.001.0".to_string()),
+				MaterialHandle("standart".to_string()),
+				t,
+				RigidBody(rbh),
+				Collider(ch),
+			),
+		);
+	}
+	let pt = Transform {
+		translation: Vec3::new(0.0, -1.0, 0.0),
+		//rotation: UnitQuaternion::from_axis_angle(&Vec3::x_axis(), 35f32.to_radians()),
+		..Default::default()
+	};
+	let (rbh, ch) = phycics.insert_fixed(
+		pt,
+		ColliderBuilder::cuboid(10.0, 0.1, 10.0)
+		.friction(0.05)
+		
+		.build()
 	);
 	entities.add_entity(
-		(&mut mesh_handles, &mut material_handle, &mut transform),
+		(
+			&mut mesh_handles,
+			&mut material_handle,
+			&mut transform,
+			&mut rigid_bodies,
+			&mut colliders,
+		),
 		(
 			MeshHandle("Plane.0".to_string()),
 			MaterialHandle("standart".to_string()),
-			Transform {
-				local: nalgebra_glm::translation(&Vec3::new(0.0, -1.0, 0.0)),
-				..Default::default()
-			},
+			pt,
+			RigidBody(rbh),
+			Collider(ch),
 		),
 	);
 	entities.add_entity(
@@ -151,6 +192,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 		.import::<modules::events::EventsModule>()?
 		.import::<modules::window::WindowModule>()?
 		.import::<modules::renderer::RendererModule>()?
+		.import::<modules::physics::PhysicsModule>()?
 		.import::<GameModule>()?
 		.run()?;
 

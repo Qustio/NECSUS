@@ -24,6 +24,7 @@ tracy-client = { version = "0.18.4", default-features = false }
 vk-mem = "0.5.0"
 winit = "0.30.13"
 slang = { version = "0.1.0", git = "https://github.com/FloatyMonkey/slang-rs", package = "shader-slang" }
+rapier3d = "0.34.0"
 
 [features]
 tracy = ["dep:tracy", "tracy-client/enable"]

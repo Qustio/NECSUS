@@ -3,6 +3,7 @@ pub mod window;
 // pub mod renderer;
 // pub mod swapchain;
 pub mod renderer;
+pub mod physics;
 // pub mod buffer;
 // pub mod mesh;
 // pub mod mesh_asset;
