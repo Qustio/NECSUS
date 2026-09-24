@@ -1,3 +1,4 @@
+use crate::prelude::*;
 use std::time::{Duration, Instant};
 
 use shipyard::{scheduler::IntoWorkloadSystem, *};
@@ -34,8 +35,9 @@ impl Module for CoreModule {
 	}
 }
 
-#[derive(Unique)]
+#[derive(Unique, DDeref)]
 pub struct EventQueue<T: Send + Sync + 'static> {
+	#[deref]
 	pub events: Vec<T>,
 }
 

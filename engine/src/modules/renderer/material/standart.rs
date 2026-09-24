@@ -2,16 +2,12 @@ use std::sync::Mutex;
 
 use bytemuck::bytes_of;
 use nalgebra_glm::{Mat4, Vec3};
+use shader_macro::compile_shader;
 use shipyard::{IntoIter, View};
 
 use crate::modules::{
-	components,
-	renderer::{
-		buffer::Buffer,
-		gbuffers::{GBuffers, MAX_SHADOW_CASTERS},
-		light::{DirectionalLight, GPULight},
-		mesh::{Vertex, VertexDescription},
-		swapchain::Swapchain,
+	components, renderer::{
+		buffer::Buffer, gbuffers::{GBuffers, MAX_SHADOW_CASTERS}, light::{DirectionalLight, GPULight}, mesh::{Vertex, VertexDescription}, pass::{Pass, RenderTarget}, swapchain::Swapchain,
 	},
 };
 
@@ -292,12 +288,11 @@ impl StandartMaterial {
 		frame_count: u32,
 	) -> Result<Self, Box<dyn Error + Send + Sync>> {
 		let shader = unsafe {
-			let blob = super::build_shader(
+			let blob: &[u32] = compile_shader!(
 				"engine/shaders/main.slang",
-				&["vertMain", "fragMain", "shadow"],
-			)?;
-			let spv: &[u32] = bytemuck::cast_slice(blob.as_slice());
-			device.create_shader_module(&vk::ShaderModuleCreateInfo::default().code(spv), None)?
+				["vertMain", "fragMain", "shadow"]
+			);
+			device.create_shader_module(&vk::ShaderModuleCreateInfo::default().code(blob), None)?
 		};
 		let shadow_sampler = unsafe {
 			device.create_sampler(
@@ -353,7 +348,7 @@ impl StandartMaterial {
 		for i in 0..frame_count as usize {
 			let image_info = [vk::DescriptorImageInfo::default()
 				.image_view(gbuffers[i].shadow.view)
-				.image_layout(vk::ImageLayout::DEPTH_READ_ONLY_OPTIMAL)];
+				.image_layout(vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL)];
 			unsafe {
 				device.update_descriptor_sets(
 					&[vk::WriteDescriptorSet::default()
@@ -379,7 +374,7 @@ impl StandartMaterial {
 		})
 	}
 
-	fn create_main_pipeline(&self) -> Result<Pipeline, Box<dyn Error + Send + Sync>> {
+	fn create_main_pipeline(&self, pass: &Box<dyn Pass>) -> Result<Pipeline, Box<dyn Error + Send + Sync>> {
 		let push_range = vk::PushConstantRange::default()
 			.stage_flags(vk::ShaderStageFlags::VERTEX)
 			.offset(0)
@@ -469,8 +464,16 @@ impl StandartMaterial {
 			.color_blend_state(&color_blend)
 			.depth_stencil_state(&depth_state)
 			.dynamic_state(&dynamic_state)
-			.layout(layout)
-			.push_next(&mut rendering_info);
+			.layout(layout);
+
+		let info = match pass.render_target() {
+			RenderTarget::RenderPass { render_pass, .. } => {
+				info.render_pass(*render_pass)
+			},
+			RenderTarget::DynamicRendering => {
+				info.push_next(&mut rendering_info)
+			},
+		};
 
 		let infos = [info];
 		let pipeline = unsafe {
@@ -485,7 +488,7 @@ impl StandartMaterial {
 		})
 	}
 
-	fn create_shadow_pipeline(&self) -> Result<Pipeline, Box<dyn Error + Send + Sync>> {
+	fn create_shadow_pipeline(&self, pass: &Box<dyn Pass>, subpass: u32) -> Result<Pipeline, Box<dyn Error + Send + Sync>> {
 		let push_range = vk::PushConstantRange::default()
 			.stage_flags(vk::ShaderStageFlags::VERTEX)
 			.offset(0)
@@ -553,8 +556,16 @@ impl StandartMaterial {
 			.multisample_state(&multisample)
 			.depth_stencil_state(&depth_state)
 			.dynamic_state(&dynamic_state)
-			.layout(layout)
-			.push_next(&mut rendering_info);
+			.layout(layout);
+			
+		let info = match pass.render_target() {
+			RenderTarget::RenderPass { render_pass, .. } => {
+				info.render_pass(*render_pass).subpass(subpass)
+			},
+			RenderTarget::DynamicRendering => {
+				info.push_next(&mut rendering_info)
+			},
+		};
 
 		let infos = [info];
 		let pipeline = unsafe {
@@ -583,11 +594,25 @@ impl Drop for StandartMaterial {
 }
 
 impl Materal for StandartMaterial {
-	fn create_pipeline(&self) -> Result<Vec<(PassID, Pipeline)>, Box<dyn Error + Send + Sync>> {
-		return Ok(vec![
-			(PassID::Geometry, self.create_main_pipeline()?),
-			(PassID::Shadow, self.create_shadow_pipeline()?),
-		]);
+	fn create_pipeline(&self, pass_manager: &PassManager) -> Result<Vec<(PassID, u32, Pipeline)>, Box<dyn Error + Send + Sync>> {
+		let shadow_pass = pass_manager.get(&PassID::Shadow).expect("no shadow pass in pass_manager");
+		// a pipeline is only valid within the exact subpass it was created for, so the
+		// legacy render-pass path (one subpass per shadow caster) needs one pipeline
+		// variant per subpass; dynamic rendering has no subpass concept, one is enough.
+		let shadow_subpasses = match shadow_pass.render_target() {
+			RenderTarget::RenderPass { subpass_count, .. } => *subpass_count,
+			RenderTarget::DynamicRendering => 1,
+		};
+
+		let mut pipelines = vec![(
+			PassID::Geometry,
+			0,
+			self.create_main_pipeline(pass_manager.get(&PassID::Geometry).expect("no geometry pass in pass_manager"))?,
+		)];
+		for subpass in 0..shadow_subpasses {
+			pipelines.push((PassID::Shadow, subpass, self.create_shadow_pipeline(shadow_pass, subpass)?));
+		}
+		Ok(pipelines)
 	}
 
 	fn bind(

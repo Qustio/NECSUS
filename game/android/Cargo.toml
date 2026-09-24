@@ -1,0 +1,51 @@
+[package]
+name = "android"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "game_android"
+crate-type = ["cdylib"]
+
+[dependencies]
+game-core = { path = "../core" }
+
+[features]
+default = []
+tracy = ["game-core/tracy"]
+gpu_label = ["game-core/gpu_label"]
+
+[package.metadata.android]
+package = "dev.qustio.necsus"
+apk_name = "necsus"
+target_sdk_version = 35
+min_sdk_version = 29
+assets = "../assets"
+
+[package.metadata.android.sdk]
+target_sdk_version = 35
+min_sdk_version = 29
+
+[[package.metadata.android.uses_feature]]
+name = "android.hardware.vulkan.level"
+required = true
+version = 1
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.application.activity]]
+name = "android.app.NativeActivity"
+orientation = "fullSensor"
+
+[[package.metadata.android.application.activity.meta_data]]
+name = "android.app.lib_name"
+value = "game_android"
+
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.VIEW", "android.intent.action.MAIN"]
+categories = ["android.intent.category.LAUNCHER"]
+
+[package.metadata.android.application]
+label = "NECSUS"
+theme = "@android:style/Theme.NoTitleBar.Fullscreen"

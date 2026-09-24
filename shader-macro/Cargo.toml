@@ -1,0 +1,13 @@
+[package]
+name = "shader-macro"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+slang = { version = "0.1.0", git = "https://github.com/FloatyMonkey/slang-rs", package = "shader-slang" }
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"

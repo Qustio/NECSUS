@@ -1,8 +1,13 @@
+use crate::prelude::*;
+
+pub mod prelude;
 pub mod modules;
-pub use imgui;
+pub use dear_imgui_rs;
 pub use nalgebra;
 pub use nalgebra_glm;
 pub use shipyard;
+#[cfg(target_os = "android")]
+pub use winit::platform::android::activity::AndroidApp;
 
 use hashbrown::HashMap;
 use shipyard::{
@@ -11,17 +16,28 @@ use shipyard::{
 };
 use std::error::Error;
 use winit::{application::ApplicationHandler, event_loop::EventLoop};
+#[cfg(target_os = "android")]
+use winit::platform::android::EventLoopBuilderExtAndroid;
 
 use crate::modules::{
 	System,
 	core::{AppData, EventQueue, EventRegistry},
 };
 
+#[derive(DDebug)]
 pub struct Engine {
 	world: World,
+	#[debug(skip)]
 	pub systems: Vec<System>,
 	pub states: Vec<Box<dyn shipyard::scheduler::Label>>,
+	started: bool,
+	#[cfg(target_os = "android")]
+	app: AndroidApp
 }
+
+#[cfg(target_os = "android")]
+#[derive(shipyard::Unique, Clone)]
+pub struct AndroidAppHandle(pub AndroidApp);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Label, Clone)]
 pub enum State {
@@ -33,7 +49,12 @@ pub enum State {
 }
 
 impl Engine {
-	pub fn new(name: &'static str, version: u32) -> Result<Self, Box<dyn Error>> {
+	pub fn new(
+		name: &'static str,
+		version: u32,
+		#[cfg(target_os = "android")]
+		app: AndroidApp
+	) -> Result<Self, Box<dyn Error>> {
 		let world = World::new();
 		let systems = vec![];
 		world.add_unique(AppData { name, version });
@@ -47,6 +68,9 @@ impl Engine {
 				Box::new(State::PostUpdate),
 				Box::new(State::Cleanup),
 			],
+			started: false,
+			#[cfg(target_os = "android")]
+			app,
 		})
 	}
 
@@ -101,6 +125,9 @@ impl Engine {
 		tracing::debug!("{:#?}", self.world.workloads_info());
 
 		// Start event loop
+		#[cfg(target_os = "android")]
+		let event_loop = EventLoop::builder().with_android_app(self.app.clone()).build().unwrap();
+		#[cfg(not(target_os = "android"))]
 		let event_loop = EventLoop::builder().build().unwrap();
 		event_loop.run_app(&mut self)?;
 		Ok(())
@@ -108,17 +135,35 @@ impl Engine {
 }
 
 impl ApplicationHandler for Engine {
+	#[tracing::instrument(name = "Engine::resumed", skip_all)]
+	
 	fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+		tracing::info!("resumed");
 		let window = modules::window::Window::new(event_loop);
+		if self.started {
+			// Android destroyed the old ANativeWindow/surface while backgrounded; reattach
+			// to the new one without rerunning Startup (which would duplicate spawned
+			// entities and rebuild everything, including a second imgui::Context - it's a
+			// process-wide singleton that panics on double-init).
+			self.world.add_unique(window);
+			self.world
+				.run_workload(modules::renderer::ReattachSurface)
+				.unwrap();
+			return;
+		}
 
 		self.world.add_unique(window);
 		self.world
 			.add_unique(modules::components::Camera::default());
+		#[cfg(target_os = "android")]
+		self.world.add_unique(AndroidAppHandle(self.app.clone()));
 		self.world.run_workload(State::Startup).unwrap();
 		self.register_event::<winit::event::WindowEvent>();
 		self.register_event::<winit::event::DeviceEvent>();
+		self.started = true;
 	}
 
+	#[tracing::instrument(name = "Engine::window_event", skip_all)]
 	fn window_event(
 		&mut self,
 		event_loop: &winit::event_loop::ActiveEventLoop,
@@ -136,6 +181,7 @@ impl ApplicationHandler for Engine {
 		}
 	}
 
+	#[tracing::instrument(name = "Engine::device_event", skip_all)]
 	fn device_event(
 		&mut self,
 		_: &winit::event_loop::ActiveEventLoop,
@@ -150,8 +196,11 @@ impl ApplicationHandler for Engine {
 		}
 	}
 
+	#[tracing::instrument(name = "Engine::about_to_wait", skip_all)]
 	fn about_to_wait(&mut self, _: &winit::event_loop::ActiveEventLoop) {
-		let _span = tracy_client::span!("EventLoop");
+		if !self.started {
+			return;
+		}
 		for state in &self.states {
 			if state.dyn_eq(&State::Startup) {
 				continue;
@@ -185,15 +234,18 @@ impl ApplicationHandler for Engine {
 		}
 	}
 
+	#[tracing::instrument(name = "Engine::suspended", skip_all)]
 	fn suspended(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
 		let _ = event_loop;
 	}
 
+	#[tracing::instrument(name = "Engine::exiting", skip_all)]
 	fn exiting(&mut self, _: &winit::event_loop::ActiveEventLoop) {
 		self.world.run_workload(State::Cleanup).unwrap();
 		tracing::info!("Done cleaning");
 	}
 
+	#[tracing::instrument(name = "Engine::memory_warning", skip_all)]
 	fn memory_warning(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
 		let _ = event_loop;
 	}

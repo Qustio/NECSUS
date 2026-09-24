@@ -1,12 +1,23 @@
+#![warn(
+    clippy::use_self,
+    deprecated_in_future,
+    rust_2018_idioms,
+    trivial_casts,
+    trivial_numeric_casts,
+    unused_qualifications
+)]
+
+use crate::prelude::*;
 use super::gbuffers::GBuffers;
-use super::vulkan_context::Device;
-use super::{debug_tools::FrameCapture, frame_sync::FrameSync, pass::Pass, swapchain::Swapchain};
+use super::vulkan_context::{Device, RenderFeature};
+use super::{debug_tools::FrameCapture, frame_sync::FrameSync, pass::{Pass, RenderTarget}, swapchain::Swapchain};
 
 use ash::*;
 use shipyard::Unique;
 use std::sync::atomic::Ordering;
 use std::{error::Error, sync::Arc};
 
+#[derive(DDebug)]
 pub struct FrameCommand {
 	pub(super) buffer: vk::CommandBuffer,
 	pub(super) pool: vk::CommandPool,
@@ -101,7 +112,8 @@ impl CommandContext {
 		let shadow = gbuffers[id_image].shadow.image;
 
 		unsafe {
-			cmd.device.cmd_pipeline_barrier2(
+			cmd.device.sync_feature.cmd_pipeline_barrier2(
+				&cmd.device,
 				cmd.buffer,
 				&vk::DependencyInfo::default().image_memory_barriers(&[
 					vk::ImageMemoryBarrier2::default()
@@ -120,7 +132,8 @@ impl CommandContext {
 						}),
 				]),
 			);
-			cmd.device.cmd_pipeline_barrier2(
+			cmd.device.sync_feature.cmd_pipeline_barrier2(
+				&cmd.device,
 				cmd.buffer,
 				&vk::DependencyInfo::default().image_memory_barriers(&[
 					vk::ImageMemoryBarrier2::default()
@@ -129,7 +142,7 @@ impl CommandContext {
 						.src_access_mask(vk::AccessFlags2::NONE)
 						.dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
 						.old_layout(vk::ImageLayout::UNDEFINED)
-						.new_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+						.new_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
 						.image(depth)
 						.subresource_range(vk::ImageSubresourceRange {
 							aspect_mask: vk::ImageAspectFlags::DEPTH,
@@ -139,7 +152,8 @@ impl CommandContext {
 						}),
 				]),
 			);
-			cmd.device.cmd_pipeline_barrier2(
+			cmd.device.sync_feature.cmd_pipeline_barrier2(
+				&cmd.device,
 				cmd.buffer,
 				&vk::DependencyInfo::default().image_memory_barriers(&[
 					vk::ImageMemoryBarrier2::default()
@@ -151,7 +165,7 @@ impl CommandContext {
 						.src_access_mask(vk::AccessFlags2::NONE)
 						.dst_access_mask(vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE)
 						.old_layout(vk::ImageLayout::UNDEFINED)
-						.new_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+						.new_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
 						.image(shadow)
 						.subresource_range(vk::ImageSubresourceRange {
 							aspect_mask: vk::ImageAspectFlags::DEPTH,
@@ -178,7 +192,8 @@ impl CommandContext {
 		let shadow = gbuffers[id_image].shadow.image;
 
 		unsafe {
-			cmd.device.cmd_pipeline_barrier2(
+			cmd.device.sync_feature.cmd_pipeline_barrier2(
+				&cmd.device,
 				cmd.buffer,
 				&vk::DependencyInfo::default().image_memory_barriers(&[
 					vk::ImageMemoryBarrier2::default()
@@ -186,8 +201,8 @@ impl CommandContext {
 						.dst_stage_mask(vk::PipelineStageFlags2::FRAGMENT_SHADER)
 						.src_access_mask(vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE)
 						.dst_access_mask(vk::AccessFlags2::SHADER_SAMPLED_READ)
-						.old_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-						.new_layout(vk::ImageLayout::DEPTH_READ_ONLY_OPTIMAL)
+						.old_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+						.new_layout(vk::ImageLayout::DEPTH_STENCIL_READ_ONLY_OPTIMAL)
 						.image(shadow)
 						.subresource_range(vk::ImageSubresourceRange {
 							aspect_mask: vk::ImageAspectFlags::DEPTH,
@@ -222,7 +237,8 @@ impl CommandContext {
 
 		unsafe {
 			if !capture.pending.load(Ordering::Relaxed) {
-				cmd.device.cmd_pipeline_barrier2(
+				cmd.device.sync_feature.cmd_pipeline_barrier2(
+					&cmd.device,
 					cmd.buffer,
 					&vk::DependencyInfo::default().image_memory_barriers(&[
 						vk::ImageMemoryBarrier2::default()
@@ -238,7 +254,8 @@ impl CommandContext {
 				);
 			} else {
 				// swapchain: COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL
-				cmd.device.cmd_pipeline_barrier2(
+				cmd.device.sync_feature.cmd_pipeline_barrier2(
+					&cmd.device,
 					cmd.buffer,
 					&vk::DependencyInfo::default().image_memory_barriers(&[
 						vk::ImageMemoryBarrier2::default()
@@ -253,7 +270,8 @@ impl CommandContext {
 					]),
 				);
 				// capture image: UNDEFINED -> TRANSFER_DST_OPTIMAL
-				cmd.device.cmd_pipeline_barrier2(
+				cmd.device.sync_feature.cmd_pipeline_barrier2(
+					&cmd.device,
 					cmd.buffer,
 					&vk::DependencyInfo::default().image_memory_barriers(&[
 						vk::ImageMemoryBarrier2::default()
@@ -306,9 +324,11 @@ impl CommandContext {
 					.filter(vk::Filter::LINEAR)
 					.regions(blit_regions);
 
-				cmd.device.cmd_blit_image2(cmd.buffer, blit_info);
+				//cmd.device.cmd_blit_image(command_buffer, src_image, src_image_layout, dst_image, dst_image_layout, regions, filter);
+				cmd.device.copy_feature.cmd_blit_image2(&cmd.device, cmd.buffer, blit_info);
 				// capture image: TRANSFER_DST_OPTIMAL -> TRANSFER_SRC_OPTIMAL
-				cmd.device.cmd_pipeline_barrier2(
+				cmd.device.sync_feature.cmd_pipeline_barrier2(
+					&cmd.device,
 					cmd.buffer,
 					&vk::DependencyInfo::default().image_memory_barriers(&[
 						vk::ImageMemoryBarrier2::default()
@@ -348,7 +368,8 @@ impl CommandContext {
 					&[region],
 				);
 				// swapchain: TRANSFER_SRC_OPTIMAL -> PRESENT_SRC_KHR
-				cmd.device.cmd_pipeline_barrier2(
+				cmd.device.sync_feature.cmd_pipeline_barrier2(
+					&cmd.device,
 					cmd.buffer,
 					&vk::DependencyInfo::default().image_memory_barriers(&[
 						vk::ImageMemoryBarrier2::default()
@@ -372,6 +393,7 @@ impl CommandContext {
 		frame_sync: &FrameSync,
 		swapchain: &Swapchain,
 		gbuffers: &GBuffers,
+		render_target: &RenderTarget,
 	) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let _span = tracy_client::span!();
 		let id = frame_sync.frame_id as usize;
@@ -380,49 +402,105 @@ impl CommandContext {
 		let image_view = swapchain.image_views[id_image];
 		let depth_view = gbuffers[id_image].depth.view;
 		unsafe {
-			cmd.device.cmd_begin_rendering(
-				cmd.buffer,
-				&vk::RenderingInfo::default()
-					.render_area(vk::Rect2D::default().extent(swapchain.extent))
-					.layer_count(1)
-					.color_attachments(&[vk::RenderingAttachmentInfo::default()
-						.image_view(image_view)
-						.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-						.load_op(vk::AttachmentLoadOp::CLEAR)
-						.store_op(vk::AttachmentStoreOp::STORE)
-						.clear_value(vk::ClearValue {
-							color: vk::ClearColorValue { float32: [0.0; 4] },
-						})])
-					.depth_attachment(
-						&vk::RenderingAttachmentInfo::default()
-							.image_view(depth_view)
-							.image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-							.load_op(vk::AttachmentLoadOp::CLEAR)
-							.store_op(vk::AttachmentStoreOp::STORE)
-							.clear_value(vk::ClearValue {
-								depth_stencil: vk::ClearDepthStencilValue {
-									depth: 0.0,
-									stencil: 0,
-								},
-							}),
-					),
-			);
+			match render_target {
+				RenderTarget::RenderPass { render_pass, framebuffers, extent, clear_values, .. } => {
+					cmd.device.cmd_begin_render_pass(
+						cmd.buffer,
+						&vk::RenderPassBeginInfo::default()
+							.render_pass(*render_pass)
+							.framebuffer(framebuffers[id_image])
+							.render_area(vk::Rect2D::default().extent(*extent))
+							.clear_values(clear_values),
+						vk::SubpassContents::SECONDARY_COMMAND_BUFFERS,
+					);
+				},
+				RenderTarget::DynamicRendering => {
+					if let RenderFeature::DynamicRendering(device) = &cmd.device.render_feature {
+						device.cmd_begin_rendering(
+							cmd.buffer,
+							&vk::RenderingInfo::default()
+								.render_area(vk::Rect2D::default().extent(swapchain.extent))
+								.layer_count(1)
+								.color_attachments(&[vk::RenderingAttachmentInfo::default()
+									.image_view(image_view)
+									.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+									.load_op(vk::AttachmentLoadOp::CLEAR)
+									.store_op(vk::AttachmentStoreOp::STORE)
+									.clear_value(vk::ClearValue {
+										color: vk::ClearColorValue { float32: [0.0; 4] },
+									})])
+								.depth_attachment(
+									&vk::RenderingAttachmentInfo::default()
+										.image_view(depth_view)
+										.image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+										.load_op(vk::AttachmentLoadOp::CLEAR)
+										.store_op(vk::AttachmentStoreOp::STORE)
+										.clear_value(vk::ClearValue {
+											depth_stencil: vk::ClearDepthStencilValue {
+												depth: 0.0,
+												stencil: 0,
+											},
+										}),
+								),
+						);
+					}
+				},
+			}
 		}
 		Ok(())
 	}
 
-	pub(super) fn execute_commands(&self, frame_sync: &FrameSync, cmds: &[&dyn Pass]) {
+	pub(super) fn execute_commands(
+		&self,
+		frame_sync: &FrameSync,
+		swapchain: &Swapchain,
+		gbuffers: &GBuffers,
+		pass: &dyn Pass,
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
 		let id = frame_sync.frame_id as usize;
 		let primary_cmd = &self.commands[id];
-		let buffers = cmds
-			.iter()
-			.map(|cmd| cmd.buffer(frame_sync))
-			.collect::<Vec<_>>();
-		unsafe {
-			primary_cmd
-				.device
-				.cmd_execute_commands(primary_cmd.buffer, &buffers);
+		let buffers = pass.buffers(frame_sync);
+
+		// legacy render passes need an actively bound instance around execute_commands -
+		// a secondary inherits one specific render_pass/subpass. dynamic rendering
+		// secondaries begin/end themselves, no bracket needed on the primary buffer.
+		if matches!(primary_cmd.device.render_feature, RenderFeature::RenderPass) {
+			self.begin_rendering(frame_sync, swapchain, gbuffers, pass.render_target())?;
+
+			// subpass_count is fixed at render-pass creation, so NextSubpass must be
+			// walked through regardless of how many buffers were actually recorded this
+			// frame (e.g. fewer active shadow casters than MAX_SHADOW_CASTERS) -
+			// unrecorded subpasses just execute nothing and keep their cleared content.
+			let subpass_count = match pass.render_target() {
+				RenderTarget::RenderPass { subpass_count, .. } => *subpass_count,
+				RenderTarget::DynamicRendering => 1,
+			};
+			for i in 0..subpass_count as usize {
+				if i > 0 {
+					unsafe {
+						primary_cmd
+							.device
+							.cmd_next_subpass(primary_cmd.buffer, vk::SubpassContents::SECONDARY_COMMAND_BUFFERS);
+					}
+				}
+				if let Some(buf) = buffers.get(i) {
+					unsafe {
+						primary_cmd
+							.device
+							.cmd_execute_commands(primary_cmd.buffer, std::slice::from_ref(buf));
+					}
+				}
+			}
+
+			self.end_rendering(frame_sync)?;
+		} else {
+			unsafe {
+				primary_cmd
+					.device
+					.cmd_execute_commands(primary_cmd.buffer, &buffers);
+			}
 		}
+		Ok(())
 	}
 
 	pub(super) fn end_rendering(
@@ -433,7 +511,14 @@ impl CommandContext {
 		let id = frame_sync.frame_id as usize;
 		let cmd = &self.commands[id];
 		unsafe {
-			cmd.device.cmd_end_rendering(cmd.buffer);
+			match &cmd.device.render_feature {
+				RenderFeature::RenderPass => {
+					cmd.device.cmd_end_render_pass(cmd.buffer);
+				},
+				RenderFeature::DynamicRendering(device) => {
+					device.cmd_end_rendering(cmd.buffer);
+				},
+			}
 		}
 		Ok(())
 	}
@@ -462,7 +547,8 @@ impl CommandContext {
 				.graphics_queue
 				.lock()
 				.expect("couldnt lock queue");
-			cmd.device.queue_submit2(
+			cmd.device.sync_feature.queue_submit2(
+				&cmd.device,
 				*queue,
 				&[vk::SubmitInfo2::default()
 					.wait_semaphore_infos(&[vk::SemaphoreSubmitInfo::default()

@@ -12,13 +12,17 @@ pub mod pass;
 pub mod swapchain;
 pub mod vulkan_context;
 
+use crate::modules::core::EventQueue;
+use crate::modules::renderer::imgui::UiDrawable;
+use crate::modules::renderer::pass::{Pass, RecordView};
+use crate::prelude::*;
+
 use crate::{
 	State,
 	modules::{
 		self, Module, System, components,
 		core::{AppData, Time},
 		renderer::{
-			imgui::UiDrawList,
 			material::standart::{FrameUniforms, StandartMaterial},
 		},
 		window::Window,
@@ -29,6 +33,7 @@ use shipyard::{
 	AllStoragesViewMut, Borrow, BorrowInfo, IntoIter, Label, UniqueView, UniqueViewMut, View,
 	scheduler::IntoWorkloadTrySystem,
 };
+use std::ops::Deref;
 use std::{error::Error, sync::atomic::Ordering};
 use winit::event::WindowEvent;
 
@@ -37,8 +42,15 @@ pub struct RendererModule;
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Label)]
 pub struct Render;
 
+/// Run directly (not part of the per-frame state cycle) from `resumed()` when Android
+/// hands back a new window after backgrounding - rebuilds only what that invalidates
+/// (Surface, Swapchain, GBuffers), leaving Instance/Device/pipelines/imgui/meshes alone.
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Label)]
+pub struct ReattachSurface;
+
 impl Module for RendererModule {
 	fn build(engine: &mut crate::Engine) -> Result<(), Box<dyn std::error::Error>> {
+		engine.register_event::<Box<dyn UiDrawable>>();
 		let pos = engine
 			.states
 			.iter()
@@ -89,11 +101,13 @@ impl Module for RendererModule {
 				Box::new(Render),
 				render_record_imgui.into_workload_try_system()?,
 			)
-			.label("Record"),
+			.label("Imgui record")
+			.after("Record"),
 		);
 		engine.systems.push(
 			System::new(Box::new(Render), render_submit.into_workload_try_system()?)
-				.after("Record"),
+				.after("Record")
+				.after("Imgui record"),
 		);
 		engine.systems.push(
 			System::new(
@@ -118,6 +132,10 @@ impl Module for RendererModule {
 			Box::new(State::Update),
 			capture_frame_ui.into_workload_try_system()?,
 		));
+		engine.systems.push(System::new(
+			Box::new(ReattachSurface),
+			reattach_surface.into_workload_try_system()?,
+		));
 		Ok(())
 	}
 }
@@ -138,6 +156,7 @@ fn render_start(
 	swapchain: UniqueView<swapchain::Swapchain>,
 	gbuffers: UniqueView<gbuffers::GBuffers>,
 	cmd_ctx: UniqueView<command_context::CommandContext>,
+	pass_manager: UniqueView<pass::PassManager>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!("render_start");
 	_span.emit_color(0xFF2255);
@@ -149,23 +168,36 @@ fn render_start(
 	cmd_ctx.to_optimal(&frame_sync, &swapchain, &gbuffers)?;
 
 	// clearing image - can be one call
-	cmd_ctx.begin_rendering(&frame_sync, &swapchain, &gbuffers)?;
-	cmd_ctx.end_rendering(&frame_sync)?;
+	// legacy mode: Main's own render pass already uses CLEAR load op, so this is a
+	// redundant second render-pass instance on the same framebuffer with no barrier
+	// between them - only needed for dynamic rendering, where Main's secondary LOADs.
+	let is_dynamic = matches!(
+		cmd_ctx.commands[frame_sync.frame_id as usize].device.render_feature,
+		vulkan_context::RenderFeature::DynamicRendering(_)
+	);
+	if is_dynamic {
+		let main_pass = pass_manager.get(&pass::PassID::Geometry).expect("couldnt get main_pass from pass_manager");
+		cmd_ctx.begin_rendering(&frame_sync, &swapchain, &gbuffers, &main_pass.render_target())?;
+		cmd_ctx.end_rendering(&frame_sync)?;
+	}
 	Ok(())
 }
 
 fn capture_frame_ui(
-	mut draw_list: UniqueViewMut<UiDrawList>,
+	mut draw_list: UniqueViewMut<EventQueue<Box<dyn UiDrawable>>>,
+	#[cfg(feature = "tracy")]
 	capture: UniqueView<debug_tools::FrameCapture>,
 	lights: View<light::DirectionalLight>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 	_span.emit_color(0xFF6600);
 
+	#[cfg(feature = "tracy")]
 	let pending = capture.pending.clone();
 	let positions: Vec<Vec3> = lights.iter().map(|l| l.position).collect();
 
-	draw_list.items.push(Box::new(move |ui: &::imgui::Ui| {
+	draw_list.push(Box::new(move |ui: &Ui| {
+		#[cfg(feature = "tracy")]
 		ui.window("Capture frame").build(|| {
 			if ui.button("capture") {
 				tracing::info!("captured frame");
@@ -183,64 +215,21 @@ fn capture_frame_ui(
 	Ok(())
 }
 
-#[derive(Borrow, BorrowInfo)]
-struct MainRecordView<'v> {
-	frame_sync: UniqueView<'v, frame_sync::FrameSync>,
-	main_pass: UniqueView<'v, pass::main::Main>,
-	swapchain: UniqueView<'v, swapchain::Swapchain>,
-	gbuffers: UniqueView<'v, gbuffers::GBuffers>,
-	mesh_assets: UniqueView<'v, mesh::MeshAssetManager>,
-	mesh_handles: View<'v, mesh::MeshHandle>,
-	material_manager: UniqueView<'v, material::MaterialManager>,
-	material_handles: View<'v, material::MaterialHandle>,
-	transforms: View<'v, components::Transform>,
-	frame_uniforms: UniqueView<'v, FrameUniforms>,
-}
-
-fn render_record_main(view: MainRecordView) -> Result<(), Box<dyn Error + Send + Sync>> {
-	let _span = tracy_client::span!();
-	_span.emit_color(0xFF6600);
-
-	view.main_pass.record(
-		&view.frame_sync,
-		&view.swapchain,
-		&view.gbuffers,
-		&view.mesh_assets,
-		&view.mesh_handles,
-		&view.material_manager,
-		&view.material_handles,
-		&view.transforms,
-		&view.frame_uniforms,
-	)?;
+#[tracing::instrument(skip_all)]
+fn render_record_main(
+	pass_manager: UniqueView<pass::PassManager>,
+	record_view: RecordView
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+	pass_manager.get(&pass::PassID::Geometry).map(|pass| pass.record(&record_view));
 	Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 fn render_record_shadows(
-	frame_sync: UniqueView<frame_sync::FrameSync>,
-	shadow_pass: UniqueView<pass::shadow::Shadow>,
-	swapchain: UniqueView<swapchain::Swapchain>,
-	gbuffers: UniqueView<gbuffers::GBuffers>,
-	mesh_assets: UniqueView<mesh::MeshAssetManager>,
-	mesh_handles: View<mesh::MeshHandle>,
-	material_manager: UniqueView<material::MaterialManager>,
-	material_handles: View<material::MaterialHandle>,
-	transforms: View<components::Transform>,
-	frame_uniforms: UniqueView<FrameUniforms>,
+	pass_manager: UniqueView<pass::PassManager>,
+	record_view: RecordView
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-	let _span = tracy_client::span!();
-	_span.emit_color(0xFF6600);
-
-	shadow_pass.record(
-		&frame_sync,
-		&swapchain,
-		&gbuffers,
-		&mesh_assets,
-		&mesh_handles,
-		&material_manager,
-		&material_handles,
-		&transforms,
-		&frame_uniforms,
-	)?;
+	pass_manager.get(&pass::PassID::Shadow).map(|pass| pass.record(&record_view));
 	Ok(())
 }
 
@@ -278,16 +267,17 @@ fn render_record_back(
 	Ok(())
 }
 
-fn render_record_imgui(
-	frame_sync: UniqueView<frame_sync::FrameSync>,
-	imgui_pass: UniqueView<imgui::ImguiState>,
-	swapchain: UniqueView<swapchain::Swapchain>,
-	mut draw_list: UniqueViewMut<imgui::UiDrawList>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-	let _span = tracy_client::span!();
-	_span.emit_color(0xFF6600);
 
-	imgui_pass.record(&frame_sync, &swapchain, &mut draw_list)?;
+#[tracing::instrument(skip_all)]
+fn render_record_imgui(
+	record_view: RecordView,
+	// frame_sync: UniqueView<frame_sync::FrameSync>,
+	imgui_pass: UniqueView<imgui::ImguiState>,
+	// swapchain: UniqueView<swapchain::Swapchain>,
+	// draw_list: UniqueView<EventQueue<Box<dyn UiDrawable>>>,
+	// window: UniqueView<Window>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+	imgui_pass.record(&record_view)?;
 	Ok(())
 }
 
@@ -295,9 +285,7 @@ fn render_submit(
 	mut frame_sync: UniqueViewMut<frame_sync::FrameSync>,
 	cmd_ctx: UniqueView<command_context::CommandContext>,
 	swapchain: UniqueView<swapchain::Swapchain>,
-	main_pass: UniqueView<pass::main::Main>,
-	shadow_pass: UniqueView<pass::shadow::Shadow>,
-	//back_pass: UniqueView<pass::back::Back>,
+	pass_manager: UniqueView<pass::PassManager>,
 	imgui_pass: UniqueView<imgui::ImguiState>,
 	capture: UniqueView<debug_tools::FrameCapture>,
 	gbuffers: UniqueView<gbuffers::GBuffers>,
@@ -305,9 +293,13 @@ fn render_submit(
 	let _span = tracy_client::span!();
 	_span.emit_color(0x5566AA);
 
-	cmd_ctx.execute_commands(&frame_sync, &[&shadow_pass]);
+	let main_pass = pass_manager.get(&pass::PassID::Geometry).expect("couldnt get main_pass from pass_manager").deref();
+	let shadow_pass = pass_manager.get(&pass::PassID::Shadow).expect("couldnt get main_pass from pass_manager").deref();
+	let imgui_pass = imgui_pass.deref();
+	cmd_ctx.execute_commands(&frame_sync, &swapchain, &gbuffers, shadow_pass)?;
 	cmd_ctx.shadow_to_readable(&frame_sync, &swapchain, &gbuffers)?;
-	cmd_ctx.execute_commands(&frame_sync, &[&main_pass, &imgui_pass]);
+	cmd_ctx.execute_commands(&frame_sync, &swapchain, &gbuffers, main_pass)?;
+	cmd_ctx.execute_commands(&frame_sync, &swapchain, &gbuffers, imgui_pass)?;
 	cmd_ctx.swapchain_to_present(&frame_sync, &swapchain, &capture)?;
 	cmd_ctx.end(&frame_sync)?;
 	cmd_ctx.submit(&frame_sync, &capture)?;
@@ -329,6 +321,8 @@ fn recreate_swapchain(
 	mut swapchain: UniqueViewMut<swapchain::Swapchain>,
 	mut gbuffers: UniqueViewMut<gbuffers::GBuffers>,
 	events: UniqueView<modules::core::EventQueue<WindowEvent>>,
+	mut pass_manager: UniqueViewMut<pass::PassManager>,
+	mut imgui_pass: UniqueViewMut<imgui::ImguiState>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
 	let _span = tracy_client::span!();
 
@@ -337,18 +331,74 @@ fn recreate_swapchain(
 		_ => None,
 	});
 	if let Some(new_size) = new_size {
-		let new_extent = swapchain.recreate(new_size)?;
+		let mut new_extent = swapchain.recreate(new_size)?;
+		// Android: surface capabilities can briefly lag the real post-rotation
+		// buffer geometry, handing back a swapped width/height. Re-querying
+		// right after settles onto the real value.
+		if (new_extent.width > new_extent.height) != (new_size.width > new_size.height) {
+			new_extent = swapchain.recreate(new_size)?;
+		}
 		gbuffers.resize(new_extent)?;
+
+		// only rebuild framebuffers on an actual resize - this used to run every
+		// frame unconditionally, leaking a framebuffer per frame per pass (see the
+		// destroy fix in RenderTarget::resize) and degrading FPS until it crashed.
+		pass_manager.resize(&swapchain, &gbuffers)?;
+		// imgui_pass isn't in pass_manager (it's a separate Unique) - its framebuffers
+		// cache the old swapchain image views, which Swapchain::recreate() just destroyed.
+		imgui_pass.resize(&swapchain, &gbuffers)?;
 	}
 
 	Ok(())
 }
 
+fn reattach_surface(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send + Sync>> {
+	let _span = tracy_client::span!();
+	let window = world.get_unique::<&Window>()?;
+	let size = window.window.inner_size();
+
+	{
+		let mut context = world.get_unique::<&mut vulkan_context::VulkanContext>()?;
+		context.recreate_surface(&window.window)?;
+	}
+
+	let new_swapchain = {
+		let context = world.get_unique::<&vulkan_context::VulkanContext>()?;
+		swapchain::Swapchain::new(
+			context.instance.clone(),
+			context.device.clone(),
+			context.surface.clone(),
+			size,
+			None,
+		)?
+	};
+	let new_extent = new_swapchain.extent;
+
+	let mut imgui_state = world.get_unique::<&mut imgui::ImguiState>()?;
+	imgui_state.reattach_window(window.clone())?;
+
+	let mut gbuffers = world.get_unique::<&mut gbuffers::GBuffers>()?;
+	gbuffers.resize(new_extent)?;
+
+	// Main/Shadow/Imgui's framebuffers still point at the old swapchain's (now
+	// destroyed) image views - rebuild them against the new swapchain before it
+	// replaces the old one, or the next begin_render_pass dereferences freed memory.
+	let mut pass_manager = world.get_unique::<&mut pass::PassManager>()?;
+	pass_manager.resize(&new_swapchain, &gbuffers)?;
+	imgui_state.resize(&new_swapchain, &gbuffers)?;
+
+	world.add_unique(new_swapchain);
+
+	Ok(())
+}
+
 fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send + Sync>> {
+	tracing::info!("setup_renderer: start");
 	let _span = tracy_client::span!();
 	let app_data = world.get_unique::<&AppData>()?;
 	let window = world.get_unique::<&Window>()?;
 	let size = window.window.inner_size();
+	tracing::info!("setup_renderer: window size {:?}", size);
 
 	// Create context
 	let context =
@@ -370,30 +420,50 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 	let command_context =
 		command_context::CommandContext::new(context.device.clone(), swapchain.frame_count)?;
 
-	// Create passes
-	let main_pass = pass::main::Main::new(context.device.clone(), swapchain.frame_count)?;
-	let shadow_pass = pass::shadow::Shadow::new(context.device.clone(), swapchain.frame_count)?;
-	// let back_pass = pass::back::Back::new(
-	// 	context.device.clone(),
-	// 	context.allocator.clone(),
-	// 	swapchain.frame_count,
-	// 	swapchain.format.format,
-	// )?;
 	let gbuffers = gbuffers::GBuffers::new(
 		swapchain.extent,
 		context.allocator.clone(),
 		context.device.clone(),
 		swapchain.frame_count,
 	)?;
+
+	// Create passes
+	let main_pass = pass::main::Main::new(
+		context.device.clone(),
+		&swapchain,
+		&gbuffers
+	)?;
+	let shadow_pass = pass::shadow::Shadow::new(
+		context.device.clone(),
+		&swapchain,
+		&gbuffers
+	)?;
+	// let back_pass = pass::back::Back::new(
+	// 	context.device.clone(),
+	// 	context.allocator.clone(),
+	// 	swapchain.frame_count,
+	// 	swapchain.format.format,
+	// )?;
+	// Build pass manager
+	let mut pass_manager = pass::PassManager::new()?;
+	pass_manager.insert(pass::PassID::Geometry, Box::new(main_pass));
+	pass_manager.insert(pass::PassID::Shadow, Box::new(shadow_pass));
+
+	#[cfg(target_os = "android")]
+	let ini_path = world
+		.get_unique::<&crate::AndroidAppHandle>()?
+		.0
+		.internal_data_path()
+		.map(|p| p.join("imgui.ini"));
+	#[cfg(not(target_os = "android"))]
+	let ini_path: Option<std::path::PathBuf> = None;
 	let imgui_pass = imgui::ImguiState::new(
 		context.instance.clone(),
 		context.device.clone(),
-		swapchain.frame_count,
-		swapchain.format.format,
-		&window.window,
+		&swapchain,
+		window.window.clone(),
+		ini_path,
 	)?;
-
-	let draw_list = imgui::UiDrawList::default();
 	let frame_capture = debug_tools::FrameCapture::new(
 		context.device.clone(),
 		context.allocator.clone(),
@@ -406,6 +476,12 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 		swapchain.frame_count,
 	)?;
 
+	#[cfg(target_os = "android")]
+	let mesh_assets = mesh::MeshAssetManager::new(
+		context.allocator.clone(),
+		world.get_unique::<&crate::AndroidAppHandle>()?.0.clone(),
+	)?;
+	#[cfg(not(target_os = "android"))]
 	let mesh_assets = mesh::MeshAssetManager::new(context.allocator.clone())?;
 	let mut material_manager = material::MaterialManager::new()?;
 	let mat = StandartMaterial::new(
@@ -415,7 +491,7 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 		&frame_uniforms,
 		frame_sync.frame_count,
 	)?;
-	material_manager.register("standart", Box::new(mat))?;
+	material_manager.register("standart", Box::new(mat), &pass_manager)?;
 
 	let camera = components::Camera::default();
 
@@ -423,12 +499,9 @@ fn setup_renderer(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send 
 	world.add_unique(swapchain);
 	world.add_unique(frame_sync);
 	world.add_unique(command_context);
-	world.add_unique(main_pass);
-	world.add_unique(shadow_pass);
-	//world.add_unique(back_pass);
+	world.add_unique(pass_manager);
 	world.add_unique(gbuffers);
 	world.add_unique(imgui_pass);
-	world.add_unique(draw_list);
 	world.add_unique(frame_capture);
 	world.add_unique(mesh_assets);
 	world.add_unique(material_manager);

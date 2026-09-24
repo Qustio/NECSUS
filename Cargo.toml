@@ -1,5 +1,14 @@
 [workspace]
 resolver = "3"
 members = [
-    "engine", "game",
+    "engine",
+    "shader-macro",
+    "game/core",
+    "game/desktop",
+    "game/android",
 ]
+
+[patch.crates-io]
+dear-imgui-ash = { path = "/home/qustio/Projects/dear-imgui-rs/backends/dear-imgui-ash" }
+dear-imgui-rs = { path = "/home/qustio/Projects/dear-imgui-rs/dear-imgui" }
+dear-imgui-winit = { path = "/home/qustio/Projects/dear-imgui-rs/backends/dear-imgui-winit" }

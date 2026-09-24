@@ -1,17 +1,18 @@
+use crate::prelude::*;
+
 use std::{error::Error, sync::Arc};
 
 use shipyard::{scheduler::IntoWorkloadSystem, *};
 use winit::{
-	event::{DeviceEvent, KeyEvent, WindowEvent},
+	event::{DeviceEvent, KeyEvent, TouchPhase, WindowEvent},
 	keyboard::KeyCode,
 	window::Fullscreen,
 };
 
 use crate::{
-	Engine, State,
-	modules::{Module, System, renderer::imgui::UiDrawList},
-	*,
+	Engine, State, modules::{Module, System, renderer::imgui::UiDrawable}, *,
 };
+
 
 #[derive(Debug)]
 pub struct WindowModule;
@@ -25,6 +26,13 @@ impl Module for WindowModule {
 		engine.systems.push(System::new(
 			Box::new(State::Update),
 			read_event.into_workload_system()?,
+		));
+		engine.systems.push(System::new(
+			Box::new(State::Startup),
+			(|world: AllStoragesViewMut| {
+				world.add_unique(TouchLook::default());
+			})
+			.into_workload_system()?,
 		));
 		Ok(())
 	}
@@ -72,13 +80,15 @@ fn move_cum(
 	mut camera: UniqueViewMut<modules::components::Camera>,
 	time: UniqueView<modules::core::Time>,
 	window: UniqueViewMut<Window>,
-	mut draw_list: UniqueViewMut<UiDrawList>,
+	mut draw_list: UniqueViewMut<EventQueue<Box<dyn UiDrawable>>>,
+	mut touch_look: UniqueViewMut<TouchLook>,
 ) -> Result<(), Box<dyn Error>> {
 	let _span = tracy_client::span!();
 	let dt = time.delta.as_secs_f32();
 	let speed = 5.0;
 	let sens = 0.002;
-	for event in events.events.iter() {
+	let touch_sens = 0.002;
+	for event in events.iter() {
 		if let winit::event::WindowEvent::KeyboardInput {
 			event:
 				KeyEvent {
@@ -99,20 +109,46 @@ fn move_cum(
 				KeyCode::AltLeft => {
 					if !pressed {
 						window
-							.window
 							.set_cursor_grab(winit::window::CursorGrabMode::Locked)
 							.ok();
-						window.window.set_cursor_visible(false);
+						window.set_cursor_visible(false);
 					}
 				}
 				_ => {}
 			}
 		}
 	}
-	for event in device_events.events.iter() {
+	for event in device_events.iter() {
 		if let winit::event::DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
 			camera.yawd = -*dx as f32 * sens;
 			camera.pitchd = *dy as f32 * sens;
+		}
+	}
+	for event in events.iter() {
+		if let WindowEvent::Touch(touch) = event {
+			match touch.phase {
+				TouchPhase::Started => {
+					if touch_look.active_id.is_none() {
+						touch_look.active_id = Some(touch.id);
+						touch_look.last_pos = (touch.location.x, touch.location.y);
+					}
+				}
+				TouchPhase::Moved => {
+					if touch_look.active_id == Some(touch.id) {
+						let (last_x, last_y) = touch_look.last_pos;
+						let dx = touch.location.x - last_x;
+						let dy = touch.location.y - last_y;
+						camera.yawd = -dx as f32 * touch_sens;
+						camera.pitchd = dy as f32 * touch_sens;
+						touch_look.last_pos = (touch.location.x, touch.location.y);
+					}
+				}
+				TouchPhase::Ended | TouchPhase::Cancelled => {
+					if touch_look.active_id == Some(touch.id) {
+						touch_look.active_id = None;
+					}
+				}
+			}
 		}
 	}
 
@@ -124,7 +160,7 @@ fn move_cum(
 	camera.pitchd = 0.0;
 	camera.yawd = 0.0;
 	let camera_c = camera.clone();
-	draw_list.items.push(Box::new(move |ui: &::imgui::Ui| {
+	draw_list.push(Box::new(move |ui: &Ui| {
 		ui.window("Camera").build(|| {
 			ui.text_colored([1.0, 0.0, 0.0, 1.0], format!("x: {}", camera_c.postition.x));
 			ui.text_colored([0.0, 1.0, 0.0, 1.0], format!("y: {}", camera_c.postition.y));
@@ -136,8 +172,15 @@ fn move_cum(
 	Ok(())
 }
 
-#[derive(Debug, Unique)]
+#[derive(Debug, Default, Unique)]
+struct TouchLook {
+	active_id: Option<u64>,
+	last_pos: (f64, f64),
+}
+
+#[derive(Debug, Unique, DDeref)]
 pub struct Window {
+	#[deref]
 	pub window: Arc<winit::window::Window>,
 }
 

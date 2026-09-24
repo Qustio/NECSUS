@@ -4,45 +4,62 @@ use shipyard::{IntoIter, Unique, View};
 use std::{error::Error, sync::Arc};
 
 use crate::modules::renderer::material;
-use crate::modules::renderer::pass::PassID;
 
-use super::Pass;
+use super::{Pass, RenderTarget, AttachmentType, PassID};
 use super::command_context::FrameCommand;
 use super::components;
 use super::frame_sync::FrameSync;
 use super::gbuffers::GBuffers;
 use super::mesh;
 use super::swapchain::Swapchain;
-use super::vulkan_context::Device;
-
+use super::vulkan_context::{Device, RenderFeature};
 #[derive(Unique)]
 pub(in super::super) struct Main {
 	commands: Vec<FrameCommand>,
+	render_target: RenderTarget,
+	device: Arc<Device>
 }
 
 impl Main {
 	pub(in super::super) fn new(
 		device: Arc<Device>,
-		frame_count: u32,
+		swapchain: &Swapchain,
+		gbuffers: &GBuffers,
 	) -> Result<Self, Box<dyn Error + Send + Sync>> {
-		let commands = (0..frame_count)
+		let commands = (0..swapchain.frame_count)
 			.map(|_| FrameCommand::new(device.clone(), vk::CommandBufferLevel::SECONDARY))
 			.collect::<Result<Vec<_>, _>>()?;
-		Ok(Self { commands })
+		let depth_views: Vec<vk::ImageView> = (0..gbuffers.len()).map(|i| gbuffers[i].depth.view).collect();
+		let render_target = RenderTarget::new(
+			&device,
+			&swapchain,
+			&[
+				(AttachmentType::Image, swapchain.format.format, &swapchain.image_views,  vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE),
+				(AttachmentType::Depth, gbuffers.depth_format, &depth_views,  vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE),
+			],
+		)?;
+		Ok(Self {
+			commands,
+			render_target,
+			device
+		})
 	}
 
 	pub(in super::super) fn record(
 		&self,
-		frame_sync: &FrameSync,
-		swapchain: &Swapchain,
-		gbuffers: &GBuffers,
-		mesh_assets: &mesh::MeshAssetManager,
-		mesh_handles: &View<mesh::MeshHandle>,
-		material_manager: &material::MaterialManager,
-		material_handles: &View<material::MaterialHandle>,
-		transforms: &View<components::Transform>,
-		frame_uniforms: &material::standart::FrameUniforms,
+		record_view: &super::RecordView,
 	) -> Result<(), Box<dyn Error + Send + Sync>> {
+		// extract views from record_view
+		let frame_sync = &record_view.frame_sync;
+		let swapchain = &record_view.swapchain;
+		let gbuffers = &record_view.gbuffers;
+		let mesh_assets = &record_view.mesh_assets;
+		let mesh_handles = &record_view.mesh_handles;
+		let material_manager = &record_view.material_manager;
+		let material_handles = &record_view.material_handles;
+		let transforms = &record_view.transforms;
+		let frame_uniforms = &record_view.frame_uniforms;
+
 		let id = frame_sync.frame_id as usize;
 		let id_image = frame_sync.acquired_image_index as usize;
 		let cmd = &self.commands[id];
@@ -51,39 +68,61 @@ impl Main {
 		unsafe {
 			cmd.device
 				.reset_command_pool(cmd.pool, vk::CommandPoolResetFlags::empty())?;
-			cmd.device.begin_command_buffer(
-				cmd.buffer,
-				&vk::CommandBufferBeginInfo::default()
-					.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
-					.inheritance_info(
-						&vk::CommandBufferInheritanceInfo::default().push_next(
-							&mut vk::CommandBufferInheritanceRenderingInfo::default()
-								.color_attachment_formats(&[swapchain.format.format])
-								.depth_attachment_format(gbuffers.depth_format)
-								.rasterization_samples(vk::SampleCountFlags::TYPE_1),
-						),
-					),
-			)?;
+
+			match &self.render_target {
+				RenderTarget::RenderPass { render_pass, .. } => {
+					cmd.device.begin_command_buffer(
+						cmd.buffer,
+						&vk::CommandBufferBeginInfo::default()
+							.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT | vk::CommandBufferUsageFlags::RENDER_PASS_CONTINUE)
+							.inheritance_info(
+								&vk::CommandBufferInheritanceInfo::default()
+									.render_pass(*render_pass)
+									.subpass(0)
+							),
+					)?;
+				},
+				RenderTarget::DynamicRendering => {
+					cmd.device.begin_command_buffer(
+						cmd.buffer,
+						&vk::CommandBufferBeginInfo::default()
+							.flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+							.inheritance_info(
+								&vk::CommandBufferInheritanceInfo::default().push_next(
+									&mut vk::CommandBufferInheritanceRenderingInfo::default()
+										.color_attachment_formats(&[swapchain.format.format])
+										.depth_attachment_format(gbuffers.depth_format)
+										.rasterization_samples(vk::SampleCountFlags::TYPE_1),
+								),
+							),
+					)?;
+				},
+			}
 			cmd.device
 				.cmd_begin_label(cmd.buffer, "main pass record", [1.0, 1.0, 1.0, 1.0]);
-			cmd.device.cmd_begin_rendering(
-				cmd.buffer,
-				&vk::RenderingInfo::default()
-					.render_area(vk::Rect2D::default().extent(swapchain.extent))
-					.layer_count(1)
-					.color_attachments(&[vk::RenderingAttachmentInfo::default()
-						.image_view(image_view)
-						.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-						.load_op(vk::AttachmentLoadOp::LOAD)
-						.store_op(vk::AttachmentStoreOp::STORE)])
-					.depth_attachment(
-						&vk::RenderingAttachmentInfo::default()
-							.image_view(depth_view)
-							.image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
-							.load_op(vk::AttachmentLoadOp::LOAD)
-							.store_op(vk::AttachmentStoreOp::STORE),
-					),
-			);
+
+			if let RenderTarget::DynamicRendering { .. } = &self.render_target {
+				if let RenderFeature::DynamicRendering(device) = &cmd.device.render_feature {
+					device.cmd_begin_rendering(
+						cmd.buffer,
+						&vk::RenderingInfo::default()
+							.render_area(vk::Rect2D::default().extent(swapchain.extent))
+							.layer_count(1)
+							.color_attachments(&[vk::RenderingAttachmentInfo::default()
+								.image_view(image_view)
+								.image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+								.load_op(vk::AttachmentLoadOp::LOAD)
+								.store_op(vk::AttachmentStoreOp::STORE)])
+							.depth_attachment(
+								&vk::RenderingAttachmentInfo::default()
+									.image_view(depth_view)
+									.image_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+									.load_op(vk::AttachmentLoadOp::LOAD)
+									.store_op(vk::AttachmentStoreOp::STORE),
+							),
+					);
+				}
+			}
 			cmd.device.cmd_set_viewport(
 				cmd.buffer,
 				0,
@@ -108,7 +147,7 @@ impl Main {
 				let Some(mesh_data) = mesh_assets.mesh_assets.get(&mesh.0) else {
 					continue;
 				};
-				let Some(pipeline) = material_manager.get_pipeline(&mat_handle.0, PassID::Geometry)
+				let Some(pipeline) = material_manager.get_pipeline(&mat_handle.0, PassID::Geometry, 0)
 				else {
 					continue;
 				};
@@ -145,7 +184,11 @@ impl Main {
 				cmd.device
 					.cmd_draw_indexed(cmd.buffer, mesh_data.index_count(), 1, 0, 0, 0);
 			}
-			cmd.device.cmd_end_rendering(cmd.buffer);
+			if let RenderTarget::DynamicRendering { .. } = &self.render_target {
+				if let RenderFeature::DynamicRendering(device) = &cmd.device.render_feature {
+					device.cmd_end_rendering(cmd.buffer);
+				}
+			}
 			cmd.device.cmd_end_label(cmd.buffer);
 			cmd.device.end_command_buffer(cmd.buffer)?;
 		}
@@ -154,8 +197,24 @@ impl Main {
 }
 
 impl Pass for Main {
-	fn buffer(&self, frame_sync: &FrameSync) -> vk::CommandBuffer {
+	fn buffers(&self, frame_sync: &FrameSync) -> Vec<vk::CommandBuffer> {
 		let id = frame_sync.frame_id as usize;
-		self.commands[id].buffer
+		vec![self.commands[id].buffer]
+	}
+	
+	fn render_target(&self) -> &RenderTarget {
+		&self.render_target
+	}
+
+	fn record(&self, record_view: &super::RecordView) {
+		self.record(record_view);
+	}
+	
+	fn resize(&mut self, swapchain: &Swapchain, gbuffers: &GBuffers) -> Result<(), Box<dyn Error + Send + Sync>> {
+		let depth_views: Vec<vk::ImageView> = (0..gbuffers.len()).map(|i| gbuffers[i].depth.view).collect();
+		self.render_target.resize(&self.device, swapchain, &[
+			(AttachmentType::Image, swapchain.format.format, &swapchain.image_views,  vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE),
+			(AttachmentType::Depth, gbuffers.depth_format, &depth_views,  vk::AttachmentLoadOp::CLEAR, vk::AttachmentStoreOp::STORE),
+		])
 	}
 }

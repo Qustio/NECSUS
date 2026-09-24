@@ -1,14 +1,18 @@
+#[cfg(target_os = "android")]
+pub use engine::AndroidApp;
+use engine::dear_imgui_rs::Ui;
+
 use std::error::Error;
 
 use engine::modules::components::Transform;
-use engine::modules::core::Time;
+use engine::modules::core::{EventQueue, Time};
 use engine::modules::physics::{Collider, ColliderBuilder, RapierData, RigidBody};
 use engine::modules::renderer::light::{self, DirectionalLight};
-use engine::modules::renderer::material::{MaterialHandle, MaterialManager};
+use engine::modules::renderer::material::MaterialHandle;
 use engine::modules::renderer::mesh::{MeshAssetManager, MeshHandle, Vertex};
 use engine::modules::{
 	Module, System,
-	renderer::imgui::{UiDrawList, UiDrawable},
+	renderer::imgui::{UiDrawable},
 };
 use engine::nalgebra::UnitQuaternion;
 use engine::nalgebra_glm::Vec3;
@@ -16,9 +20,25 @@ use engine::shipyard::{EntitiesViewMut, IntoIter, ViewMut};
 use engine::*;
 use shipyard::{UniqueView, UniqueViewMut, scheduler::IntoWorkloadSystem};
 use tracing::{self};
-use tracing_subscriber::Layer;
 use tracing_subscriber::fmt;
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
+
+// tracing_subscriber's fmt::Layer::with_writer wants `Fn() -> W where W: io::Write`;
+// wrapping the file lets a cheap Arc clone satisfy that on every log call.
+#[cfg(target_os = "android")]
+#[derive(Clone)]
+struct SharedFile(std::sync::Arc<std::sync::Mutex<std::fs::File>>);
+
+#[cfg(target_os = "android")]
+impl std::io::Write for SharedFile {
+	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+		self.0.lock().unwrap().write(buf)
+	}
+	fn flush(&mut self) -> std::io::Result<()> {
+		self.0.lock().unwrap().flush()
+	}
+}
 
 struct GameModule;
 impl Module for GameModule {
@@ -50,13 +70,13 @@ fn rotate_light(time: UniqueView<Time>, mut lights: ViewMut<DirectionalLight>) {
 
 struct Demo;
 impl UiDrawable for Demo {
-	fn draw(&self, ui: &imgui::Ui) {
+	fn draw(&self, ui: &Ui) {
 		ui.show_demo_window(&mut true);
 	}
 }
 
-fn draw_ui(mut draw_list: UniqueViewMut<UiDrawList>) {
-	draw_list.items.push(Box::new(Demo));
+fn draw_ui(mut draw_list: UniqueViewMut<EventQueue<Box<dyn UiDrawable>>>) {
+	draw_list.push(Box::new(Demo));
 }
 
 fn spawn_objects(
@@ -123,7 +143,7 @@ fn spawn_objects(
 	}
 	let pt = Transform {
 		translation: Vec3::new(0.0, -1.0, 0.0),
-		//rotation: UnitQuaternion::from_axis_angle(&Vec3::x_axis(), 35f32.to_radians()),
+		rotation: UnitQuaternion::from_axis_angle(&Vec3::x_axis(), 5f32.to_radians()),
 		..Default::default()
 	};
 	let (rbh, ch) = phycics.insert_fixed(
@@ -159,13 +179,25 @@ fn spawn_objects(
 	);
 }
 
-#[cfg(any(feature = "tracy"))]
+#[cfg(feature = "memory_profiling")]
 #[global_allocator]
 static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
 	tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
 
-fn main() -> Result<(), Box<dyn Error>> {
+pub fn game_main(
+	#[cfg(target_os = "android")]
+	app: AndroidApp
+) -> Result<(), Box<dyn Error>> {
 	let subscriber = tracing_subscriber::registry();
+
+	#[cfg(target_os = "android")]	
+	let subscriber = subscriber.with(
+		paranoid_android::layer("necsus").with_filter(
+			tracing_subscriber::filter::Targets::new()
+				.with_default(tracing::Level::TRACE)
+				.with_target("winit", tracing::Level::WARN),
+		),
+	);
 
 	#[cfg(feature = "tracy")]
 	let subscriber = subscriber.with(tracing_tracy::TracyLayer::default());
@@ -178,16 +210,57 @@ fn main() -> Result<(), Box<dyn Error>> {
 		.with_target(true)
 		.with_thread_ids(true)
 		.with_thread_names(true);
+
 	#[cfg(not(debug_assertions))]
 	let fmt_layer = fmt_layer.with_filter(tracing_subscriber::filter::LevelFilter::from_level(
 		tracing::Level::ERROR,
 	));
 	let subscriber = subscriber.with(fmt_layer);
 
-	tracing::subscriber::set_global_default(subscriber).expect("setup tracy layer");
+	#[cfg(target_os = "android")]
+	let log_path = app
+		.external_data_path()
+		.expect("application external data path is none")
+		.join("necsus.log");
+	#[cfg(target_os = "android")]
+	let subscriber = {
+		let file = std::fs::OpenOptions::new()
+			.create(true)
+			.append(true)
+			.open(&log_path)
+			.expect("couldn't open log file");
+		let file = SharedFile(std::sync::Arc::new(std::sync::Mutex::new(file)));
+		let file_layer = fmt::Layer::default()
+			.with_writer(move || file.clone())
+			.with_ansi(false)
+			.with_target(true);
+		subscriber.with(file_layer)
+	};
+
+	// android can re-invoke this entry point in the same process (activity relaunch after
+	// a crash, some config-change paths) - the subscriber is a process-wide singleton, so
+	// treat "already set" as fine rather than panicking.
+	let _ = tracing::subscriber::set_global_default(subscriber);
+
+	#[cfg(target_os = "android")]
+	tracing::info!("log file at {:?}", log_path);
 
 	color_eyre::install()?;
-	Engine::new("test_game", 1)?
+	// color_eyre's hook prints to stderr, which doesn't reach necsus.log or the
+	// android logcat tracing layer - chain a log through tracing too, so a panic
+	// (e.g. the Startup workload's .unwrap()) is visible wherever the log file is.
+	let default_panic_hook = std::panic::take_hook();
+	std::panic::set_hook(Box::new(move |info| {
+		tracing::error!("PANIC: {}", info);
+		default_panic_hook(info);
+	}));
+
+	Engine::new(
+		"test_game", 
+		1,
+		#[cfg(target_os = "android")]
+		app
+	)?
 		.import::<modules::core::CoreModule>()?
 		.import::<modules::events::EventsModule>()?
 		.import::<modules::window::WindowModule>()?
@@ -197,5 +270,5 @@ fn main() -> Result<(), Box<dyn Error>> {
 		.run()?;
 
 	tracing::info!("close");
-	Ok(())
+	Ok(()) 
 }

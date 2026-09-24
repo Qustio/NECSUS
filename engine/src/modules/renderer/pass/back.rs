@@ -78,7 +78,7 @@ impl Back {
 						),
 					),
 			)?;
-			cmd.device.cmd_begin_rendering(
+			cmd.device.dynamic_rendering.cmd_begin_rendering(
 				cmd.buffer,
 				&vk::RenderingInfo::default()
 					.render_area(vk::Rect2D::default().extent(swapchain.extent))
@@ -123,7 +123,7 @@ impl Back {
 				vk::IndexType::UINT32,
 			);
 			cmd.device.cmd_draw_indexed(cmd.buffer, 6, 1, 0, 0, 0);
-			cmd.device.cmd_end_rendering(cmd.buffer);
+			cmd.device.dynamic_rendering.cmd_end_rendering(cmd.buffer);
 			cmd.device.end_command_buffer(cmd.buffer)?;
 		}
 		Ok(())

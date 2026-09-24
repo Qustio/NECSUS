@@ -61,9 +61,9 @@ impl Swapchain {
 		let present_mode = present_modes
 			.into_iter()
 			.min_by_key(|&pm| match pm {
-				vk::PresentModeKHR::FIFO_RELAXED => 2,
+				vk::PresentModeKHR::FIFO_RELAXED => 0,
 				vk::PresentModeKHR::FIFO => 1,
-				vk::PresentModeKHR::MAILBOX => 0,
+				vk::PresentModeKHR::MAILBOX => 2,
 				_ => 3,
 			})
 			.ok_or("no suitable present mode found")?;
@@ -72,11 +72,21 @@ impl Swapchain {
 		tracing::info!("current: {:?}", capabilities.current_extent);
 		tracing::info!("max: {:?}", capabilities.max_image_extent);
 		tracing::info!("min: {:?}", capabilities.min_image_extent);
-		let extent = capabilities.current_extent;
-		// let extent = vk::Extent2D {
-		// 	width: size.width,
-		// 	height: size.height
-		// };
+		// current_extent is the surface's own authoritative size, queried synchronously;
+		// winit's cached window size can lag a frame behind on Android after rotation,
+		// which is what causes width/height to occasionally come in swapped.
+		let extent = if capabilities.current_extent.width != u32::MAX {
+			capabilities.current_extent
+		} else {
+			vk::Extent2D {
+				width: size
+					.width
+					.clamp(capabilities.min_image_extent.width, capabilities.max_image_extent.width),
+				height: size
+					.height
+					.clamp(capabilities.min_image_extent.height, capabilities.max_image_extent.height),
+			}
+		};
 		tracing::info!("extent: {:?}", extent);
 
 		let old_swapchain = old_swapchain.unwrap_or(vk::SwapchainKHR::null());

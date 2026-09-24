@@ -1,0 +1,12 @@
+[package]
+name = "desktop"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+game-core = { path = "../core" }
+
+[features]
+default = []
+tracy = ["game-core/tracy"]
+gpu_label = ["game-core/gpu_label"]

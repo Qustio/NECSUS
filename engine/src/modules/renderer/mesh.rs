@@ -4,6 +4,8 @@ use std::{error::Error, sync::Arc};
 use ash::*;
 use hashbrown::HashMap;
 use shipyard::{Component, Unique};
+#[cfg(target_os = "android")]
+use winit::platform::android::activity::AndroidApp;
 
 use super::buffer::Buffer;
 use super::vulkan_context::Allocator;
@@ -19,22 +21,66 @@ pub trait MeshData: Send + Sync {
 pub struct MeshAssetManager {
 	pub mesh_assets: HashMap<String, Box<dyn MeshData>>,
 	allocator: Arc<Allocator>,
+	#[cfg(target_os = "android")]
+	app: AndroidApp,
 }
 
 #[derive(Component)]
 pub struct MeshHandle(pub String);
 
 impl MeshAssetManager {
+	#[cfg(target_os = "android")]
+	pub(super) fn new(
+		allocator: Arc<Allocator>,
+		app: AndroidApp,
+	) -> Result<Self, Box<dyn Error + Send + Sync>> {
+		Ok(Self {
+			mesh_assets: HashMap::new(),
+			allocator,
+			app,
+		})
+	}
+
+	#[cfg(not(target_os = "android"))]
 	pub(super) fn new(allocator: Arc<Allocator>) -> Result<Self, Box<dyn Error + Send + Sync>> {
 		Ok(Self {
 			mesh_assets: HashMap::new(),
 			allocator,
 		})
 	}
+
+	#[cfg(target_os = "android")]
 	pub fn load_gltf<V: FromGLTF + 'static>(
 		&mut self,
 		path: &str,
 	) -> Result<(), Box<dyn Error + Send + Sync>> {
+		let mgr = self.app.asset_manager();
+		let mut asset = mgr
+			.open(&std::ffi::CString::new(path)?)
+			.ok_or_else(|| format!("asset not found: {path}"))?;
+		let mut bytes = Vec::new();
+		std::io::Read::read_to_end(&mut asset, &mut bytes)?;
+		let (doc, buffers, _) = gltf::import_slice(&bytes)?;
+		for mesh in doc.meshes() {
+			for (i, primitive) in mesh.primitives().enumerate() {
+				let (vertexes, indices) = V::from_primitive(&primitive, &buffers);
+				let key = format!("{}.{}", mesh.name().unwrap_or("mesh"), i);
+				tracing::debug!("Loaded mesh: {}", key);
+				self.mesh_assets.insert(
+					key,
+					Box::new(Mesh::<V>::new(vertexes, indices, self.allocator.clone())?),
+				);
+			}
+		}
+		Ok(())
+	}
+
+	#[cfg(not(target_os = "android"))]
+	pub fn load_gltf<V: FromGLTF + 'static>(
+		&mut self,
+		path: impl AsRef<std::path::Path>,
+	) -> Result<(), Box<dyn Error + Send + Sync>> {
+		let path = std::path::Path::new("assets").join(path);
 		let (doc, buffers, _) = gltf::import(path)?;
 		for mesh in doc.meshes() {
 			for (i, primitive) in mesh.primitives().enumerate() {
