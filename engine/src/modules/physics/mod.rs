@@ -1,20 +1,20 @@
-use std::error::Error;
+use std::{error::Error, time};
 
-use nalgebra::{Vector3, vector};
 use rapier3d::{
 	dynamics::{
 		CCDSolver, ImpulseJointSet, IntegrationParameters, IslandManager, MultibodyJointSet, RigidBodyBuilder, RigidBodySet,
 	}, geometry::{ColliderSet, DefaultBroadPhase, NarrowPhase}, math::Vec3, pipeline::PhysicsPipeline,
 };
 use shipyard::{
-	AllStoragesViewMut, Component, IntoIter, Label, Unique, UniqueView, UniqueViewMut, View,
+	AllStoragesViewMut, Component, IntoIter, Label, Unique, UniqueViewMut, View,
 	ViewMut, scheduler::IntoWorkloadTrySystem,
 };
 
 use crate::{
 	State,
-	modules::{Module, System, components::Transform, core::Time},
+	modules::{Module, System, components::Transform},
 };
+use crate::modules::core::FixedTime;
 
 pub struct PhysicsModule;
 
@@ -26,19 +26,19 @@ pub use rapier3d::geometry::ColliderBuilder;
 
 impl Module for PhysicsModule {
 	fn build(engine: &mut crate::Engine) -> Result<(), Box<dyn std::error::Error>> {
-		let pos = engine
-			.states
-			.iter()
-			.position(|s| s.dyn_eq(&State::PreUpdate))
-			.unwrap();
-		engine.states.insert(pos, Box::new(PhysicsStep));
+		// let pos = engine
+		// 	.states
+		// 	.iter()
+		// 	.position(|s| s.dyn_eq(&State::PreUpdate))
+		// 	.unwrap();
+		// engine.states.insert(pos, Box::new(PhysicsStep));
 
 		engine.systems.push(System::new(
 			Box::new(State::Startup),
 			setup_physics.into_workload_try_system()?,
 		));
 		engine.systems.push(System::new(
-			Box::new(PhysicsStep),
+			Box::new(State::Tick),
 			step.into_workload_try_system()?,
 		));
 		Ok(())
@@ -58,13 +58,17 @@ pub struct RapierData {
 	impulse_joint_set: ImpulseJointSet,
 	multibody_joint_set: MultibodyJointSet,
 	ccd_solver: CCDSolver,
-	accumulator: f32,
 }
 
 impl RapierData {
-	fn new() -> Self {
+	fn new(step: time::Duration) -> Self {
+		let integration_parameters =  IntegrationParameters {
+			dt: step.as_millis() as f32 / 1000.0f32,
+			..Default::default()
+		};
 		Self {
 			gravity: Vec3::new(0.0, -9.81, 0.0),
+			integration_parameters,
 			..Default::default()
 		}
 	}
@@ -133,7 +137,8 @@ impl RapierData {
 }
 
 fn setup_physics(world: AllStoragesViewMut) -> Result<(), Box<dyn Error + Send + Sync>> {
-	let rapier_data = RapierData::new();
+	let fixed_time = world.get_unique::<&FixedTime>()?;
+	let rapier_data = RapierData::new(fixed_time.step);
 	world.add_unique(rapier_data);
 	Ok(())
 }
@@ -144,25 +149,16 @@ pub struct RigidBody(pub rapier3d::dynamics::RigidBodyHandle);
 pub struct Collider(pub rapier3d::geometry::ColliderHandle);
 
 fn step(
-	time: UniqueView<Time>,
 	mut rapier_data: UniqueViewMut<RapierData>,
 	rigid_bodies: View<RigidBody>,
-	mut transforms: ViewMut<Transform>,
+	mut transforms: ViewMut<Transform>,	
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-	rapier_data.accumulator += time.delta.as_secs_f32();
-	let mut updated = false;
-	while rapier_data.accumulator >= rapier_data.integration_parameters.dt {
-		rapier_data.step();
-		updated = true;
-		rapier_data.accumulator -= rapier_data.integration_parameters.dt
-	}
-	if updated {
-		for (body, transform) in (&rigid_bodies, &mut transforms).iter() {
-			let pose = *rapier_data.rigid_body_set[body.0].position();
-			let iso: nalgebra::Isometry3<f32> = pose.into();
-			transform.translation = iso.translation.vector;
-			transform.rotation = iso.rotation;
-		}
+	rapier_data.step();
+	for (body, transform) in (&rigid_bodies, &mut transforms).iter() {
+		let pose = *rapier_data.rigid_body_set[body.0].position();
+		let iso: nalgebra::Isometry3<f32> = pose.into();
+		transform.translation = iso.translation.vector;
+		transform.rotation = iso.rotation;
 	}
 	Ok(())
 }

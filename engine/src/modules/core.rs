@@ -22,7 +22,7 @@ impl Module for CoreModule {
 				Box::new(State::PreUpdate),
 				update_fixed_time.into_workload_system()?,
 			)
-			.before("Time"),
+			.after("Time"),
 		);
 		engine.systems.push(
 			System::new(
@@ -98,13 +98,23 @@ fn startup(world: AllStoragesViewMut) {
 		last_frame: Instant::now(),
 	});
 	world.add_unique(FixedTime {
-		step: Duration::from_millis(1000 / 16),
+		step: Duration::from_millis(1000 / 60),
 		accumulator: Duration::ZERO,
 	});
 }
 
 fn update_fixed_time(time: UniqueView<Time>, mut fixed: UniqueViewMut<FixedTime>) {
 	fixed.accumulator += time.delta;
+}
+
+pub(crate) fn consume_fixed_time(mut fixed: UniqueViewMut<FixedTime>) -> bool {
+	if fixed.accumulator >= fixed.step {
+		let s = fixed.step;
+		fixed.accumulator -= s;
+		true
+	} else {
+		false
+	}
 }
 
 fn update_time(mut time: UniqueViewMut<Time>) {

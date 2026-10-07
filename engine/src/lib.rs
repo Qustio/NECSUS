@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{modules::core::consume_fixed_time, prelude::*};
 
 pub mod prelude;
 pub mod modules;
@@ -43,6 +43,7 @@ pub struct AndroidAppHandle(pub AndroidApp);
 pub enum State {
 	Startup,
 	PreUpdate,
+	Tick,
 	Update,
 	PostUpdate,
 	Cleanup,
@@ -67,6 +68,7 @@ impl Engine {
 				Box::new(State::Update),
 				Box::new(State::PostUpdate),
 				Box::new(State::Cleanup),
+				Box::new(State::Tick),
 			],
 			started: false,
 			#[cfg(target_os = "android")]
@@ -208,8 +210,14 @@ impl ApplicationHandler for Engine {
 			if state.dyn_eq(&State::Cleanup) {
 				continue;
 			}
+			if state.dyn_eq(&State::Tick) {
+				while self.world.run(consume_fixed_time) {
+					self.world.run_workload(State::Tick).unwrap();
+				}
+				continue;
+			}
 			self.world.run_workload(state.dyn_clone()).unwrap();
-		}
+		}		
 
 		// Clear events
 		{
