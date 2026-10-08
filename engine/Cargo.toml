@@ -20,9 +20,9 @@ tracy-client = { version = "0.19.0", default-features = false }
 vk-mem = "0.5.0"
 winit = "0.30.13"
 rapier3d = "0.34.0"
-dear-imgui-rs = "0.18.0"
-dear-imgui-ash = { version = "0.18.0", features = ["dynamic-rendering", "render-pass"] }
-dear-imgui-winit = { version = "0.18.0", features = ["native-platform-support"] }
+dear-imgui-rs = { version = "0.18.0",  git = "https://github.com/Qustio/dear-imgui-rs", branch = "ash-render-features"}
+dear-imgui-ash = { version = "0.18.0", features = ["dynamic-rendering", "render-pass"], git = "https://github.com/Qustio/dear-imgui-rs", branch = "ash-render-features" }
+dear-imgui-winit = { version = "0.18.0", features = ["native-platform-support"], git = "https://github.com/Qustio/dear-imgui-rs", branch = "ash-render-features" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 winit = { version = "0.30.13", features = ["android-native-activity"] }

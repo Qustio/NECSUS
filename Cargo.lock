@@ -493,6 +493,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 [[package]]
 name = "dear-imgui-ash"
 version = "0.18.0"
+source = "git+https://github.com/Qustio/dear-imgui-rs?branch=ash-render-features#a9557a5e9b1ed6fb839cd4ff3d77c72f2b66c9bd"
 dependencies = [
  "ash",
  "dear-imgui-rs",
@@ -502,6 +503,7 @@ dependencies = [
 [[package]]
 name = "dear-imgui-build-support"
 version = "0.18.0"
+source = "git+https://github.com/Qustio/dear-imgui-rs?branch=ash-render-features#a9557a5e9b1ed6fb839cd4ff3d77c72f2b66c9bd"
 dependencies = [
  "cc",
  "serde",
@@ -511,6 +513,7 @@ dependencies = [
 [[package]]
 name = "dear-imgui-rs"
 version = "0.18.0"
+source = "git+https://github.com/Qustio/dear-imgui-rs?branch=ash-render-features#a9557a5e9b1ed6fb839cd4ff3d77c72f2b66c9bd"
 dependencies = [
  "bitflags 2.11.1",
  "dear-imgui-sys",
@@ -521,6 +524,7 @@ dependencies = [
 [[package]]
 name = "dear-imgui-sys"
 version = "0.18.0"
+source = "git+https://github.com/Qustio/dear-imgui-rs?branch=ash-render-features#a9557a5e9b1ed6fb839cd4ff3d77c72f2b66c9bd"
 dependencies = [
  "cc",
  "dear-imgui-build-support",
@@ -530,6 +534,7 @@ dependencies = [
 [[package]]
 name = "dear-imgui-winit"
 version = "0.18.0"
+source = "git+https://github.com/Qustio/dear-imgui-rs?branch=ash-render-features#a9557a5e9b1ed6fb839cd4ff3d77c72f2b66c9bd"
 dependencies = [
  "dear-imgui-rs",
  "objc2 0.6.4",
